@@ -152,6 +152,12 @@ impl FramedPoset {
         crate::dot::to_dot(self)
     }
 
+    /// Render this poset as DOT with node coordinates fixed by the compass
+    /// spring layout.
+    pub fn to_compass_spring_dot(&self) -> String {
+        crate::dot::to_compass_spring_dot(self)
+    }
+
     fn faces_all(&self, dim: usize, pos: usize) -> IntSet {
         intset::union(&self.faces_in[dim][pos], &self.faces_out[dim][pos])
     }

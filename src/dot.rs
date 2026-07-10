@@ -3,6 +3,9 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
+use crate::compass_spring_nd::{
+    AxisPort, Edge as SpringEdge, Graph as SpringGraph, SimParams, simulate_projected_2d,
+};
 use crate::embedding::Embedding;
 use crate::poset::{FramedPoset, Sign};
 
@@ -17,6 +20,34 @@ pub fn to_dot(shape: &FramedPoset) -> String {
     write_header(&mut out);
     write_nodes(&mut out, shape, &HashSet::new(), false);
     write_ranks(&mut out, shape);
+    write_edges(&mut out, shape, &HashSet::new(), false);
+    writeln!(&mut out, "}}").unwrap();
+
+    out
+}
+
+/// Render a framed poset as DOT with node coordinates fixed by the
+/// compass-directed spring simulation.
+///
+/// The generated DOT contains `pos="x,y!"` and `pin=true` attributes. Render it
+/// with Graphviz's position-respecting engines, for example:
+///
+/// ```text
+/// neato -n2 -Tsvg input.dot -o output.svg
+/// ```
+pub fn to_compass_spring_dot(shape: &FramedPoset) -> String {
+    to_compass_spring_dot_with_params(shape, &SimParams::default())
+}
+
+/// Like [`to_compass_spring_dot`], but using caller-provided simulation
+/// parameters.
+pub fn to_compass_spring_dot_with_params(shape: &FramedPoset, params: &SimParams) -> String {
+    let mut out = String::new();
+    let positions = compass_spring_positions(shape, params);
+
+    writeln!(&mut out, "digraph ofposet_compass_spring {{").unwrap();
+    write_positioned_header(&mut out);
+    write_positioned_nodes(&mut out, shape, &positions);
     write_edges(&mut out, shape, &HashSet::new(), false);
     writeln!(&mut out, "}}").unwrap();
 
@@ -55,11 +86,44 @@ fn write_header(out: &mut String) {
     writeln!(out, "  edge [fontname=\"sans-serif\"];").unwrap();
 }
 
+fn write_positioned_header(out: &mut String) {
+    writeln!(
+        out,
+        "  graph [layout=neato, outputorder=edgesfirst, overlap=false, splines=true];"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  node [shape=box, style=rounded, fontname=\"sans-serif\", pin=true];"
+    )
+    .unwrap();
+    writeln!(out, "  edge [fontname=\"sans-serif\"];").unwrap();
+}
+
 fn write_nodes(out: &mut String, shape: &FramedPoset, image: &HashSet<Cell>, mark_image: bool) {
     for dim in 0..shape.sizes().len() {
         for pos in 0..shape.sizes()[dim] {
             let in_image = mark_image && image.contains(&Cell { dim, pos });
             write_node(out, shape, dim, pos, mark_image, in_image);
+        }
+    }
+}
+
+fn write_positioned_nodes(out: &mut String, shape: &FramedPoset, positions: &[[f64; 2]]) {
+    let mut index = 0;
+    for dim in 0..shape.sizes().len() {
+        for pos in 0..shape.sizes()[dim] {
+            let [x, y] = positions[index];
+            writeln!(
+                out,
+                "  {} [label=\"{}\", pos=\"{:.6},{:.6}!\"];",
+                node_id(dim, pos),
+                escape_label(&node_label(shape, dim, pos)),
+                x,
+                y,
+            )
+            .unwrap();
+            index += 1;
         }
     }
 }
@@ -214,6 +278,97 @@ fn image_edges(embedding: &Embedding) -> HashSet<Edge> {
     edges
 }
 
+fn compass_spring_positions(shape: &FramedPoset, params: &SimParams) -> Vec<[f64; 2]> {
+    let graph = compass_spring_graph(shape);
+    orient_for_screen(simulate_projected_2d(&graph, params))
+}
+
+fn orient_for_screen(positions: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    positions.into_iter().map(|[x, y]| [x, -y]).collect()
+}
+
+fn compass_spring_graph(shape: &FramedPoset) -> SpringGraph {
+    let sizes = shape.sizes();
+    let mut node_of_cell: Vec<Vec<usize>> = sizes.iter().map(|&n| vec![0; n]).collect();
+    let mut node_count = 0;
+    let mut max_axis = None::<usize>;
+
+    for dim in 0..sizes.len() {
+        for pos in 0..sizes[dim] {
+            node_of_cell[dim][pos] = node_count;
+            node_count += 1;
+            for &axis in shape.basis_of(dim, pos) {
+                max_axis = Some(max_axis.map_or(axis, |current| current.max(axis)));
+            }
+        }
+    }
+
+    let mut edges = Vec::new();
+    for dim in 1..sizes.len() {
+        for pos in 0..sizes[dim] {
+            for &face in shape.faces_of(Sign::Input, dim, pos) {
+                edges.push(compass_spring_edge(
+                    shape,
+                    &node_of_cell,
+                    Sign::Input,
+                    dim - 1,
+                    face,
+                    dim,
+                    pos,
+                ));
+            }
+            for &face in shape.faces_of(Sign::Output, dim, pos) {
+                edges.push(compass_spring_edge(
+                    shape,
+                    &node_of_cell,
+                    Sign::Output,
+                    dim - 1,
+                    face,
+                    dim,
+                    pos,
+                ));
+            }
+        }
+    }
+
+    SpringGraph {
+        dim: max_axis.map_or(1, |axis| axis + 1),
+        node_count,
+        edges,
+    }
+}
+
+fn compass_spring_edge(
+    shape: &FramedPoset,
+    node_of_cell: &[Vec<usize>],
+    sign: Sign,
+    face_dim: usize,
+    face_pos: usize,
+    cell_dim: usize,
+    cell_pos: usize,
+) -> SpringEdge {
+    let axis = added_axis(
+        shape.basis_of(face_dim, face_pos),
+        shape.basis_of(cell_dim, cell_pos),
+    );
+    let positive = sign == Sign::Input;
+
+    SpringEdge {
+        tail: node_of_cell[face_dim][face_pos],
+        head: node_of_cell[cell_dim][cell_pos],
+        tail_port: Some(AxisPort::new(axis, positive)),
+        head_port: Some(AxisPort::new(axis, !positive)),
+    }
+}
+
+fn added_axis(face_basis: &[usize], cell_basis: &[usize]) -> usize {
+    cell_basis
+        .iter()
+        .copied()
+        .find(|axis| face_basis.binary_search(axis).is_err())
+        .expect("a cover relation must add one basis direction")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Cell {
     dim: usize,
@@ -308,5 +463,40 @@ mod tests {
         assert!(dot.contains("c0_0 -> c1_2 [label=\"-\", color=\"#c2410c\""));
         assert!(dot.contains("c0_2 -> c1_2 [label=\"+\", color=\"#2563eb\""));
         assert!(dot.contains("c0_0 -> c1_0 [label=\"-\", color=\"#d4d4d8\""));
+    }
+
+    #[test]
+    fn compass_spring_dot_pins_nodes() {
+        let square = square();
+        let dot = to_compass_spring_dot(&square);
+
+        assert!(dot.contains("digraph ofposet_compass_spring"));
+        assert!(dot.contains("layout=neato"));
+        assert!(dot.contains("pos=\""));
+        assert!(!dot.contains("rank=same"));
+    }
+
+    #[test]
+    fn compass_spring_orients_square_input_top_left() {
+        let square = square();
+        let positions = compass_spring_positions(&square, &SimParams::default());
+
+        let input = positions[0];
+        let output_0 = positions[1];
+        let output_1 = positions[2];
+
+        assert!(output_0[0] > input[0], "{{0}} direction should point right");
+        assert!(
+            (output_0[1] - input[1]).abs() < 1.0,
+            "{{0}} direction should stay horizontal"
+        );
+        assert!(
+            (output_1[0] - input[0]).abs() < 1.0,
+            "{{1}} direction should stay vertical"
+        );
+        assert!(
+            output_1[1] < input[1],
+            "{{1}} direction should point down in DOT coordinates"
+        );
     }
 }
