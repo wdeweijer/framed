@@ -276,7 +276,7 @@ mod tests {
     use super::*;
 
     fn square() -> Arc<FramedPoset> {
-        Arc::new(FramedPoset::make(
+        Arc::new(FramedPoset::from_faces(
             vec![
                 vec![vec![], vec![], vec![], vec![]],
                 vec![vec![0], vec![0], vec![1], vec![1]],
@@ -291,16 +291,6 @@ mod tests {
                 vec![vec![], vec![], vec![], vec![]],
                 vec![vec![1], vec![3], vec![2], vec![3]],
                 vec![vec![1, 3]],
-            ],
-            vec![
-                vec![vec![0, 2], vec![3], vec![1], vec![]],
-                vec![vec![0], vec![], vec![0], vec![]],
-                vec![vec![]],
-            ],
-            vec![
-                vec![vec![], vec![0], vec![2], vec![1, 3]],
-                vec![vec![], vec![0], vec![], vec![0]],
-                vec![vec![]],
             ],
         ))
     }

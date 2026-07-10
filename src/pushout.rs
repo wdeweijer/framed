@@ -221,12 +221,10 @@ mod tests {
     }
 
     fn arrow() -> Arc<FramedPoset> {
-        Arc::new(FramedPoset::make(
+        Arc::new(FramedPoset::from_faces(
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
-            vec![vec![vec![0], vec![]], vec![vec![]]],
-            vec![vec![vec![], vec![0]], vec![vec![]]],
         ))
     }
 
@@ -259,24 +257,18 @@ mod tests {
     #[test]
     #[should_panic]
     fn pushout_detects_glued_basis_mismatch_in_debug() {
-        let base = Arc::new(FramedPoset::make(
+        let base = Arc::new(FramedPoset::from_faces(
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
-            vec![vec![vec![0], vec![]], vec![vec![]]],
-            vec![vec![vec![], vec![0]], vec![vec![]]],
         ));
-        let ext = Arc::new(FramedPoset::make(
+        let ext = Arc::new(FramedPoset::from_faces(
             vec![vec![vec![], vec![]], vec![vec![1]]],
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
-            vec![vec![vec![0], vec![]], vec![vec![]]],
-            vec![vec![vec![], vec![0]], vec![vec![]]],
         ));
-        let dom = Arc::new(FramedPoset::make(
+        let dom = Arc::new(FramedPoset::from_faces(
             vec![vec![], vec![vec![0]]],
-            vec![vec![], vec![vec![]]],
-            vec![vec![], vec![vec![]]],
             vec![vec![], vec![vec![]]],
             vec![vec![], vec![vec![]]],
         ));

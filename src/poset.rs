@@ -57,20 +57,41 @@ impl FramedPoset {
         poset
     }
 
+    /// Construct a framed poset from basis and signed face tables.
+    ///
+    /// The signed coface tables are generated as the reverse adjacency of the
+    /// supplied signed face tables.
+    pub fn from_faces(
+        basis: Vec<Vec<IntSet>>,
+        faces_in: Vec<Vec<IntSet>>,
+        faces_out: Vec<Vec<IntSet>>,
+    ) -> Self {
+        let sizes: Vec<usize> = basis.iter().map(Vec::len).collect();
+        let mut cofaces_in: Vec<Vec<IntSet>> = sizes.iter().map(|&n| vec![vec![]; n]).collect();
+        let mut cofaces_out: Vec<Vec<IntSet>> = sizes.iter().map(|&n| vec![vec![]; n]).collect();
+
+        for dim in 1..basis.len() {
+            for pos in 0..basis[dim].len() {
+                for &face in &faces_in[dim][pos] {
+                    intset::insert(&mut cofaces_in[dim - 1][face], pos);
+                }
+                for &face in &faces_out[dim][pos] {
+                    intset::insert(&mut cofaces_out[dim - 1][face], pos);
+                }
+            }
+        }
+
+        FramedPoset::make(basis, faces_in, faces_out, cofaces_in, cofaces_out)
+    }
+
     /// Empty framed poset.
     pub fn empty() -> Self {
-        FramedPoset::make(vec![], vec![], vec![], vec![], vec![])
+        FramedPoset::from_faces(vec![], vec![], vec![])
     }
 
     /// The point: one 0-cell with empty basis.
     pub fn point() -> Self {
-        FramedPoset::make(
-            vec![vec![vec![]]],
-            vec![vec![vec![]]],
-            vec![vec![vec![]]],
-            vec![vec![vec![]]],
-            vec![vec![vec![]]],
-        )
+        FramedPoset::from_faces(vec![vec![vec![]]], vec![vec![vec![]]], vec![vec![vec![]]])
     }
 
     /// Highest basis cardinality present, or `-1` for empty.
@@ -378,17 +399,15 @@ mod tests {
     use super::*;
 
     fn tight_arrow() -> Arc<FramedPoset> {
-        Arc::new(FramedPoset::make(
+        Arc::new(FramedPoset::from_faces(
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
-            vec![vec![vec![0], vec![]], vec![vec![]]],
-            vec![vec![vec![], vec![0]], vec![vec![]]],
         ))
     }
 
     fn square() -> Arc<FramedPoset> {
-        Arc::new(FramedPoset::make(
+        Arc::new(FramedPoset::from_faces(
             vec![
                 vec![vec![], vec![], vec![], vec![]],
                 vec![vec![0], vec![0], vec![1], vec![1]],
@@ -404,16 +423,6 @@ mod tests {
                 vec![vec![1], vec![3], vec![2], vec![3]],
                 vec![vec![1, 3]],
             ],
-            vec![
-                vec![vec![0, 2], vec![3], vec![1], vec![]],
-                vec![vec![0], vec![], vec![0], vec![]],
-                vec![vec![]],
-            ],
-            vec![
-                vec![vec![], vec![0], vec![2], vec![1, 3]],
-                vec![vec![], vec![0], vec![], vec![0]],
-                vec![vec![]],
-            ],
         ))
     }
 
@@ -427,6 +436,16 @@ mod tests {
         assert_eq!(point.dim(), 0);
         assert_eq!(point.sizes(), vec![1]);
         assert_eq!(point.basis_of(0, 0), &Vec::<usize>::new());
+    }
+
+    #[test]
+    fn from_faces_generates_cofaces() {
+        let arrow = tight_arrow();
+
+        assert_eq!(arrow.cofaces_of(Sign::Input, 0, 0), &vec![0]);
+        assert_eq!(arrow.cofaces_of(Sign::Input, 0, 1), &Vec::<usize>::new());
+        assert_eq!(arrow.cofaces_of(Sign::Output, 0, 0), &Vec::<usize>::new());
+        assert_eq!(arrow.cofaces_of(Sign::Output, 0, 1), &vec![0]);
     }
 
     #[test]
