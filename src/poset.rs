@@ -60,14 +60,6 @@ impl FramedPoset {
     /// Empty framed poset.
     pub fn empty() -> Self {
         FramedPoset::make(vec![], vec![], vec![], vec![], vec![])
-        // Self {
-        //     dim: -1,
-        //     basis: vec![],
-        //     faces_in: vec![],
-        //     faces_out: vec![],
-        //     cofaces_in: vec![],
-        //     cofaces_out: vec![],
-        // }
     }
 
     /// The point: one 0-cell with empty basis.
@@ -79,14 +71,6 @@ impl FramedPoset {
             vec![vec![vec![]]],
             vec![vec![vec![]]],
         )
-        // Self {
-        //     dim: 0,
-        //     basis: vec![vec![vec![]]],
-        //     faces_in: vec![vec![vec![]]],
-        //     faces_out: vec![vec![vec![]]],
-        //     cofaces_in: vec![vec![vec![]]],
-        //     cofaces_out: vec![vec![vec![]]],
-        // }
     }
 
     /// Highest basis cardinality present, or `-1` for empty.
