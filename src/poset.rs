@@ -280,6 +280,10 @@ impl FramedPoset {
                 }
 
                 if dim > 0 {
+                    if self.faces_in[dim][pos].is_empty() && self.faces_out[dim][pos].is_empty() {
+                        return false;
+                    }
+
                     for &face in &self.faces_in[dim][pos] {
                         if !self.valid_face(dim, pos, face)
                             || !self.cofaces_in[dim - 1][face].contains(&pos)
@@ -575,6 +579,20 @@ mod tests {
             faces_out: vec![vec![vec![]], vec![vec![0]]],
             cofaces_in: vec![vec![vec![0]], vec![vec![]]],
             cofaces_out: vec![vec![vec![0]], vec![vec![]]],
+        };
+
+        assert!(!poset.well_formed());
+    }
+
+    #[test]
+    fn well_formed_rejects_positive_cell_without_faces() {
+        let poset = FramedPoset {
+            dim: 1,
+            basis: vec![vec![vec![]], vec![vec![0]]],
+            faces_in: vec![vec![vec![]], vec![vec![]]],
+            faces_out: vec![vec![vec![]], vec![vec![]]],
+            cofaces_in: vec![vec![vec![]], vec![vec![]]],
+            cofaces_out: vec![vec![vec![]], vec![vec![]]],
         };
 
         assert!(!poset.well_formed());

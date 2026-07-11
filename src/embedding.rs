@@ -247,9 +247,9 @@ mod tests {
 
     fn open_edge() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::from_faces(
-            vec![vec![], vec![vec![0]]],
-            vec![vec![], vec![vec![]]],
-            vec![vec![], vec![vec![]]],
+            vec![vec![vec![]], vec![vec![0]]],
+            vec![vec![vec![]], vec![vec![0]]],
+            vec![vec![vec![]], vec![vec![]]],
         ))
     }
 
@@ -339,10 +339,14 @@ mod tests {
         let embedding = Embedding::make(
             open_edge(),
             cod,
-            vec![vec![], vec![0]],
-            vec![vec![NO_PREIMAGE, NO_PREIMAGE], vec![0]],
+            vec![vec![0], vec![0]],
+            vec![vec![0, NO_PREIMAGE], vec![0]],
         );
 
+        let subset = FramedPosetSubset::from_embedding(&embedding);
+        assert!(subset.contains(0, 0));
+        assert!(!subset.contains(0, 1));
+        assert!(subset.contains(1, 0));
         assert!(!embedding.is_closed());
     }
 

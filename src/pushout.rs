@@ -268,22 +268,22 @@ mod tests {
             vec![vec![vec![], vec![]], vec![vec![1]]],
         ));
         let dom = Arc::new(FramedPoset::from_faces(
-            vec![vec![], vec![vec![0]]],
-            vec![vec![], vec![vec![]]],
-            vec![vec![], vec![vec![]]],
+            vec![vec![vec![]], vec![vec![0]]],
+            vec![vec![vec![]], vec![vec![0]]],
+            vec![vec![vec![]], vec![vec![]]],
         ));
 
         let into_base = Embedding {
             dom: Arc::clone(&dom),
             cod: Arc::clone(&base),
-            map: vec![vec![], vec![0]],
-            inv: vec![vec![NO_PREIMAGE, NO_PREIMAGE], vec![0]],
+            map: vec![vec![0], vec![0]],
+            inv: vec![vec![0, NO_PREIMAGE], vec![0]],
         };
         let into_ext = Embedding {
             dom,
             cod: Arc::clone(&ext),
-            map: vec![vec![], vec![0]],
-            inv: vec![vec![NO_PREIMAGE, NO_PREIMAGE], vec![0]],
+            map: vec![vec![0], vec![0]],
+            inv: vec![vec![0, NO_PREIMAGE], vec![0]],
         };
 
         let _ = multi_pushout(
