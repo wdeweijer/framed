@@ -72,34 +72,6 @@ impl FramedPosetSubset {
             .unwrap_or(false)
     }
 
-    /// Smallest closed subset containing this subset.
-    pub fn free_closure(&self) -> Self {
-        debug_assert!(self.well_formed());
-        let mut keep = self.keep.clone();
-
-        for dim in (1..keep.len()).rev() {
-            for pos in 0..keep[dim].len() {
-                if !keep[dim][pos] {
-                    continue;
-                }
-                for face in self.shape.faces_all(dim, pos) {
-                    keep[dim - 1][face] = true;
-                }
-            }
-        }
-
-        Self::make(Arc::clone(&self.shape), keep)
-    }
-
-    /// True when every face of every subset cell is again in the subset.
-    pub fn is_closed(&self) -> bool {
-        if !self.well_formed() {
-            return false;
-        }
-
-        self.keep == self.free_closure().keep
-    }
-
     fn well_formed(&self) -> bool {
         let sizes = self.shape.sizes();
         self.keep.len() == sizes.len()
@@ -542,24 +514,6 @@ mod tests {
     }
 
     #[test]
-    fn subset_closedness_checks_faces() {
-        let arrow = tight_arrow();
-
-        let endpoint =
-            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![true, false], vec![false]]);
-        assert!(endpoint.is_closed());
-        assert_eq!(endpoint.free_closure().keep, endpoint.keep);
-
-        let open_edge =
-            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![false, false], vec![true]]);
-        assert!(!open_edge.is_closed());
-        assert_eq!(
-            open_edge.free_closure().keep,
-            vec![vec![true, true], vec![true]]
-        );
-    }
-
-    #[test]
     fn subset_from_embedding_marks_image_cells() {
         let arrow = tight_arrow();
         let (_, input_embedding) = boundary(Sign::Input, 0, &arrow);
@@ -567,7 +521,6 @@ mod tests {
 
         assert!(subset.contains(0, 0));
         assert!(!subset.contains(0, 1));
-        assert!(subset.is_closed());
     }
 
     #[test]

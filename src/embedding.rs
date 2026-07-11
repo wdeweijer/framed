@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::poset::{FramedPoset, FramedPosetSubset, Sign};
+use crate::intset;
+use crate::poset::{FramedPoset, Sign};
 
 /// Sentinel stored in inverse maps when a codomain cell has no preimage.
 pub const NO_PREIMAGE: usize = usize::MAX;
@@ -107,12 +108,34 @@ impl Embedding {
             && image_edges(a) == image_edges(b)
     }
 
-    /// True when the image subset is downward closed in the codomain.
+    /// True when the image is an induced downward sub-poset of the codomain.
     ///
-    /// That is, every input or output face of every image cell is again in the
-    /// image.
+    /// For every domain cell, its signed faces must be exactly the preimages of
+    /// the corresponding signed faces of its image in the codomain.  This is
+    /// stronger than asking whether the image cells form a closed subset:
+    /// incidences between image cells must also be present in the domain.
     pub fn is_closed(&self) -> bool {
-        FramedPosetSubset::from_embedding(self).is_closed()
+        if !self.well_formed() {
+            return false;
+        }
+
+        for dim in 1..self.map.len() {
+            for (dom_pos, &cod_pos) in self.map[dim].iter().enumerate() {
+                for sign in [Sign::Input, Sign::Output] {
+                    let mapped_faces = intset::collect_sorted(
+                        self.dom
+                            .faces_of(sign, dim, dom_pos)
+                            .iter()
+                            .map(|&face| self.map[dim - 1][face]),
+                    );
+                    if mapped_faces != *self.cod.faces_of(sign, dim, cod_pos) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
     }
 
     /// Render this embedding as Graphviz DOT.
@@ -343,10 +366,20 @@ mod tests {
             vec![vec![0, NO_PREIMAGE], vec![0]],
         );
 
-        let subset = FramedPosetSubset::from_embedding(&embedding);
-        assert!(subset.contains(0, 0));
-        assert!(!subset.contains(0, 1));
-        assert!(subset.contains(1, 0));
+        assert!(!embedding.is_closed());
+    }
+
+    #[test]
+    fn is_closed_rejects_bijective_image_with_missing_incidence() {
+        let cod = arrow();
+        let embedding = Embedding::make(
+            input_half_arrow(),
+            cod,
+            vec![vec![0, 1], vec![0]],
+            vec![vec![0, 1], vec![0]],
+        );
+
+        assert_eq!(embedding.map, Embedding::id(Arc::clone(&embedding.cod)).map);
         assert!(!embedding.is_closed());
     }
 
