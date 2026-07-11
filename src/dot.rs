@@ -9,49 +9,49 @@ use crate::compass_spring_nd::{
 use crate::embedding::Embedding;
 use crate::poset::{FramedPoset, Sign};
 
+/// DOT layout strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Renderer {
+    /// Let Graphviz rank cells by basis cardinality.
+    Ranked,
+    /// Use the compass-directed spring simulation to pin exact node positions.
+    CompassSpring,
+}
+
 /// Render a framed poset as a Graphviz DOT directed graph.
 ///
 /// Edges point from each face to the cell that covers it. Input edges are
 /// orange and labelled `-`; output edges are blue and labelled `+`.
-pub fn to_dot(shape: &FramedPoset) -> String {
+pub fn to_dot(shape: &FramedPoset, renderer: Renderer) -> String {
+    to_dot_with_params(shape, renderer, &SimParams::default())
+}
+
+/// Render a framed poset with caller-provided compass-spring parameters.
+///
+/// The parameters are used only by [`Renderer::CompassSpring`].
+pub fn to_dot_with_params(shape: &FramedPoset, renderer: Renderer, params: &SimParams) -> String {
     let mut out = String::new();
 
-    writeln!(&mut out, "digraph ofposet {{").unwrap();
-    write_header(&mut out);
-    write_nodes(&mut out, shape, &HashSet::new(), false);
-    write_ranks(&mut out, shape);
-    write_edges(&mut out, shape, &HashSet::new(), false);
+    writeln!(&mut out, "digraph {} {{", poset_graph_name(renderer)).unwrap();
+    write_shape(
+        &mut out,
+        shape,
+        &HashSet::new(),
+        &HashSet::new(),
+        false,
+        renderer,
+        params,
+    );
     writeln!(&mut out, "}}").unwrap();
 
     out
 }
 
-/// Render a framed poset as DOT with node coordinates fixed by the
-/// compass-directed spring simulation.
-///
-/// The generated DOT contains `pos="x,y!"` and `pin=true` attributes. Render it
-/// with Graphviz's position-respecting engines, for example:
-///
-/// ```text
-/// neato -n2 -Tsvg input.dot -o output.svg
-/// ```
-pub fn to_compass_spring_dot(shape: &FramedPoset) -> String {
-    to_compass_spring_dot_with_params(shape, &SimParams::default())
-}
-
-/// Like [`to_compass_spring_dot`], but using caller-provided simulation
-/// parameters.
-pub fn to_compass_spring_dot_with_params(shape: &FramedPoset, params: &SimParams) -> String {
-    let mut out = String::new();
-    let positions = compass_spring_positions(shape, params);
-
-    writeln!(&mut out, "digraph ofposet_compass_spring {{").unwrap();
-    write_positioned_header(&mut out);
-    write_positioned_nodes(&mut out, shape, &positions);
-    write_edges(&mut out, shape, &HashSet::new(), false);
-    writeln!(&mut out, "}}").unwrap();
-
-    out
+fn poset_graph_name(renderer: Renderer) -> &'static str {
+    match renderer {
+        Renderer::Ranked => "ofposet",
+        Renderer::CompassSpring => "ofposet_compass_spring",
+    }
 }
 
 /// Render an embedding as a Graphviz DOT directed graph.
@@ -60,20 +60,61 @@ pub fn to_compass_spring_dot_with_params(shape: &FramedPoset, params: &SimParams
 /// edge is highlighted exactly when it is the image of an edge in the domain.
 /// In particular, a codomain edge whose endpoints are both image nodes is not
 /// highlighted unless the corresponding domain edge exists.
-pub fn embedding_to_dot(embedding: &Embedding) -> String {
+pub fn embedding_to_dot(embedding: &Embedding, renderer: Renderer) -> String {
+    embedding_to_dot_with_params(embedding, renderer, &SimParams::default())
+}
+
+/// Render an embedding with caller-provided compass-spring parameters.
+///
+/// The parameters are used only by [`Renderer::CompassSpring`].
+pub fn embedding_to_dot_with_params(
+    embedding: &Embedding,
+    renderer: Renderer,
+    params: &SimParams,
+) -> String {
     let mut out = String::new();
     let image_nodes = image_nodes(embedding);
     let image_edges = image_edges(embedding);
     let codomain = embedding.cod.as_ref();
 
     writeln!(&mut out, "digraph ofposet_embedding {{").unwrap();
-    write_header(&mut out);
-    write_nodes(&mut out, codomain, &image_nodes, true);
-    write_ranks(&mut out, codomain);
-    write_edges(&mut out, codomain, &image_edges, true);
+    write_shape(
+        &mut out,
+        codomain,
+        &image_nodes,
+        &image_edges,
+        true,
+        renderer,
+        params,
+    );
     writeln!(&mut out, "}}").unwrap();
 
     out
+}
+
+fn write_shape(
+    out: &mut String,
+    shape: &FramedPoset,
+    image_nodes: &HashSet<Cell>,
+    image_edges: &HashSet<Edge>,
+    mark_image: bool,
+    renderer: Renderer,
+    params: &SimParams,
+) {
+    match renderer {
+        Renderer::Ranked => {
+            write_header(out);
+            write_nodes(out, shape, image_nodes, mark_image);
+            write_ranks(out, shape);
+        }
+        Renderer::CompassSpring => {
+            let positions = compass_spring_positions(shape, params);
+            write_positioned_header(out);
+            write_positioned_nodes(out, shape, &positions, image_nodes, mark_image);
+        }
+    }
+
+    write_edges(out, shape, image_edges, mark_image);
 }
 
 fn write_header(out: &mut String) {
@@ -104,25 +145,31 @@ fn write_nodes(out: &mut String, shape: &FramedPoset, image: &HashSet<Cell>, mar
     for dim in 0..shape.sizes().len() {
         for pos in 0..shape.sizes()[dim] {
             let in_image = mark_image && image.contains(&Cell { dim, pos });
-            write_node(out, shape, dim, pos, mark_image, in_image);
+            write_node(out, shape, dim, pos, mark_image, in_image, None);
         }
     }
 }
 
-fn write_positioned_nodes(out: &mut String, shape: &FramedPoset, positions: &[[f64; 2]]) {
+fn write_positioned_nodes(
+    out: &mut String,
+    shape: &FramedPoset,
+    positions: &[[f64; 2]],
+    image: &HashSet<Cell>,
+    mark_image: bool,
+) {
     let mut index = 0;
     for dim in 0..shape.sizes().len() {
         for pos in 0..shape.sizes()[dim] {
-            let [x, y] = positions[index];
-            writeln!(
+            let in_image = mark_image && image.contains(&Cell { dim, pos });
+            write_node(
                 out,
-                "  {} [label=\"{}\", pos=\"{:.6},{:.6}!\"];",
-                node_id(dim, pos),
-                escape_label(&node_label(shape, dim, pos)),
-                x,
-                y,
-            )
-            .unwrap();
+                shape,
+                dim,
+                pos,
+                mark_image,
+                in_image,
+                Some(positions[index]),
+            );
             index += 1;
         }
     }
@@ -135,32 +182,28 @@ fn write_node(
     pos: usize,
     mark_image: bool,
     in_image: bool,
+    position: Option<[f64; 2]>,
 ) {
-    if mark_image && in_image {
-        writeln!(
-            out,
-            "  {} [label=\"{}\", style=\"rounded,filled\", color=\"#0891b2\", fillcolor=\"#ecfeff\", penwidth=3];",
-            node_id(dim, pos),
-            escape_label(&node_label(shape, dim, pos)),
-        )
-        .unwrap();
-    } else if mark_image {
-        writeln!(
-            out,
-            "  {} [label=\"{}\", color=\"#a1a1aa\", fontcolor=\"#71717a\"];",
-            node_id(dim, pos),
-            escape_label(&node_label(shape, dim, pos)),
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "  {} [label=\"{}\"];",
-            node_id(dim, pos),
-            escape_label(&node_label(shape, dim, pos)),
-        )
-        .unwrap();
+    let mut attrs = vec![format!(
+        "label=\"{}\"",
+        escape_label(&node_label(shape, dim, pos))
+    )];
+
+    if let Some([x, y]) = position {
+        attrs.push(format!("pos=\"{:.6},{:.6}!\"", x, y));
     }
+
+    if mark_image && in_image {
+        attrs.push("style=\"rounded,filled\"".to_owned());
+        attrs.push("color=\"#0891b2\"".to_owned());
+        attrs.push("fillcolor=\"#ecfeff\"".to_owned());
+        attrs.push("penwidth=3".to_owned());
+    } else if mark_image {
+        attrs.push("color=\"#a1a1aa\"".to_owned());
+        attrs.push("fontcolor=\"#71717a\"".to_owned());
+    }
+
+    writeln!(out, "  {} [{}];", node_id(dim, pos), attrs.join(", ")).unwrap();
 }
 
 fn write_ranks(out: &mut String, shape: &FramedPoset) {
@@ -454,7 +497,7 @@ mod tests {
     fn renders_embedding_image_edges_distinct_from_endpoint_image() {
         let square = square();
         let (_, embedding) = boundary(Sign::Input, 0, &square);
-        let dot = embedding_to_dot(&embedding);
+        let dot = embedding_to_dot(&embedding, Renderer::Ranked);
 
         assert!(dot.contains("digraph ofposet_embedding"));
         assert!(dot.contains("c0_0 [label=\"(0, 0)\\n{}\", style=\"rounded,filled\""));
@@ -466,9 +509,24 @@ mod tests {
     }
 
     #[test]
+    fn renders_embedding_with_compass_spring_renderer() {
+        let square = square();
+        let (_, embedding) = boundary(Sign::Input, 0, &square);
+        let dot = embedding_to_dot(&embedding, Renderer::CompassSpring);
+
+        assert!(dot.contains("digraph ofposet_embedding"));
+        assert!(dot.contains("layout=neato"));
+        assert!(dot.contains("c0_0 [label=\"(0, 0)\\n{}\", pos=\""));
+        assert!(dot.contains("style=\"rounded,filled\""));
+        assert!(dot.contains("c0_0 -> c1_2 [label=\"-\", color=\"#c2410c\""));
+        assert!(dot.contains("c0_0 -> c1_0 [label=\"-\", color=\"#d4d4d8\""));
+        assert!(!dot.contains("rank=same"));
+    }
+
+    #[test]
     fn compass_spring_dot_pins_nodes() {
         let square = square();
-        let dot = to_compass_spring_dot(&square);
+        let dot = to_dot(&square, Renderer::CompassSpring);
 
         assert!(dot.contains("digraph ofposet_compass_spring"));
         assert!(dot.contains("layout=neato"));

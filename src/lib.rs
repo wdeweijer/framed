@@ -12,6 +12,8 @@ pub mod intset;
 pub mod poset;
 pub mod pushout;
 
-pub use dot::{embedding_to_dot, to_compass_spring_dot, to_compass_spring_dot_with_params, to_dot};
+pub use dot::{
+    Renderer, embedding_to_dot, embedding_to_dot_with_params, to_dot, to_dot_with_params,
+};
 pub use embedding::{Embedding, NO_PREIMAGE};
-pub use poset::{FramedPoset, Sign, boundary};
+pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary};

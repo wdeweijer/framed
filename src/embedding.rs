@@ -1,8 +1,9 @@
 //! Embeddings of framed posets.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::poset::FramedPoset;
+use crate::poset::{FramedPoset, FramedPosetSubset, Sign};
 
 /// Sentinel stored in inverse maps when a codomain cell has no preimage.
 pub const NO_PREIMAGE: usize = usize::MAX;
@@ -95,9 +96,28 @@ impl Embedding {
         Self::make(Arc::clone(&f.dom), Arc::clone(&g.cod), map, inv)
     }
 
+    /// Equality as subobjects of a common codomain.
+    ///
+    /// The codomains are compared structurally, but the domains are not.
+    /// Instead, two embeddings are equal when they have the same image cells
+    /// and the same signed image cover relations in that codomain.
+    pub fn equal(a: &Self, b: &Self) -> bool {
+        FramedPoset::equal(&a.cod, &b.cod)
+            && image_cells(a) == image_cells(b)
+            && image_edges(a) == image_edges(b)
+    }
+
+    /// True when the image subset is downward closed in the codomain.
+    ///
+    /// That is, every input or output face of every image cell is again in the
+    /// image.
+    pub fn is_closed(&self) -> bool {
+        FramedPosetSubset::from_embedding(self).is_closed()
+    }
+
     /// Render this embedding as Graphviz DOT.
-    pub fn to_dot(&self) -> String {
-        crate::dot::embedding_to_dot(self)
+    pub fn to_dot(&self, renderer: crate::dot::Renderer) -> String {
+        crate::dot::embedding_to_dot(self, renderer)
     }
 
     fn well_formed(&self) -> bool {
@@ -155,6 +175,44 @@ impl Embedding {
     }
 }
 
+fn image_cells(embedding: &Embedding) -> HashSet<(usize, usize)> {
+    embedding
+        .map
+        .iter()
+        .enumerate()
+        .flat_map(|(dim, row)| row.iter().copied().map(move |pos| (dim, pos)))
+        .collect()
+}
+
+fn image_edges(embedding: &Embedding) -> HashSet<(Sign, usize, usize, usize, usize)> {
+    let mut edges = HashSet::new();
+
+    for dim in 1..embedding.dom.sizes().len() {
+        for pos in 0..embedding.dom.sizes()[dim] {
+            for &face in embedding.dom.faces_of(Sign::Input, dim, pos) {
+                edges.insert((
+                    Sign::Input,
+                    dim - 1,
+                    embedding.map[dim - 1][face],
+                    dim,
+                    embedding.map[dim][pos],
+                ));
+            }
+            for &face in embedding.dom.faces_of(Sign::Output, dim, pos) {
+                edges.insert((
+                    Sign::Output,
+                    dim - 1,
+                    embedding.map[dim - 1][face],
+                    dim,
+                    embedding.map[dim][pos],
+                ));
+            }
+        }
+    }
+
+    edges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +226,30 @@ mod tests {
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
+        ))
+    }
+
+    fn reversed_arrow() -> Arc<FramedPoset> {
+        Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![1]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+        ))
+    }
+
+    fn input_half_arrow() -> Arc<FramedPoset> {
+        Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![]]],
+        ))
+    }
+
+    fn open_edge() -> Arc<FramedPoset> {
+        Arc::new(FramedPoset::from_faces(
+            vec![vec![], vec![vec![0]]],
+            vec![vec![], vec![vec![]]],
+            vec![vec![], vec![vec![]]],
         ))
     }
 
@@ -207,6 +289,61 @@ mod tests {
             vec![NO_PREIMAGE],
         ];
         Embedding::make(dom, cod, map, inv)
+    }
+
+    #[test]
+    fn equal_compares_images_not_domain_presentations() {
+        let cod = arrow();
+        let id = Embedding::id(Arc::clone(&cod));
+        let reversed = reversed_arrow();
+        let reversed_map = vec![vec![1, 0], vec![0]];
+        let reversed_inv = reversed_map.clone();
+        let reversed_embedding = Embedding::make(reversed, cod, reversed_map, reversed_inv);
+
+        assert!(!FramedPoset::equal(&id.dom, &reversed_embedding.dom));
+        assert!(Embedding::equal(&id, &reversed_embedding));
+    }
+
+    #[test]
+    fn equal_sees_signed_image_edges() {
+        let cod = arrow();
+        let id = Embedding::id(Arc::clone(&cod));
+        let same_cells = Embedding::make(
+            input_half_arrow(),
+            cod,
+            vec![vec![0, 1], vec![0]],
+            vec![vec![0, 1], vec![0]],
+        );
+
+        assert_eq!(image_cells(&id), image_cells(&same_cells));
+        assert!(!Embedding::equal(&id, &same_cells));
+    }
+
+    #[test]
+    fn equal_rejects_different_codomains() {
+        let into_arrow = endpoint_embedding(0, arrow());
+        let into_square = endpoint_embedding(0, square());
+
+        assert!(!Embedding::equal(&into_arrow, &into_square));
+    }
+
+    #[test]
+    fn is_closed_accepts_downward_closed_image() {
+        assert!(Embedding::id(arrow()).is_closed());
+        assert!(endpoint_embedding(0, arrow()).is_closed());
+    }
+
+    #[test]
+    fn is_closed_rejects_image_missing_faces() {
+        let cod = arrow();
+        let embedding = Embedding::make(
+            open_edge(),
+            cod,
+            vec![vec![], vec![0]],
+            vec![vec![NO_PREIMAGE, NO_PREIMAGE], vec![0]],
+        );
+
+        assert!(!embedding.is_closed());
     }
 
     #[test]

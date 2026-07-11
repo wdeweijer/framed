@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use ofposets::{FramedPoset, Sign, boundary, embedding_to_dot, to_compass_spring_dot, to_dot};
+use ofposets::{Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, to_dot};
 
 fn main() -> std::io::Result<()> {
     let output_dir = Path::new("visualizations");
@@ -11,10 +11,13 @@ fn main() -> std::io::Result<()> {
 
     let square = Arc::new(two_direction_square());
 
-    fs::write(output_dir.join("two_direction_square.dot"), to_dot(&square))?;
+    fs::write(
+        output_dir.join("two_direction_square.dot"),
+        to_dot(&square, Renderer::Ranked),
+    )?;
     fs::write(
         output_dir.join("two_direction_square_compass_spring.dot"),
-        to_compass_spring_dot(&square),
+        to_dot(&square, Renderer::CompassSpring),
     )?;
 
     write_boundary(output_dir, &square, Sign::Input, 0, "minus_0")?;
@@ -22,13 +25,49 @@ fn main() -> std::io::Result<()> {
     write_boundary(output_dir, &square, Sign::Input, 1, "minus_1")?;
     write_boundary(output_dir, &square, Sign::Output, 1, "plus_1")?;
 
-    for dim in 3..=5 {
+    for dim in 1..=4 {
         let cube = n_cube(dim);
         fs::write(
             output_dir.join(format!("n_cube_{}_compass_spring.dot", dim)),
-            to_compass_spring_dot(&cube),
+            to_dot(&cube, Renderer::CompassSpring),
         )?;
     }
+
+    let three_cube = Arc::new(n_cube(3));
+    let (minus_0_boundary, minus_0_embedding) = boundary(Sign::Input, 0, &three_cube);
+    fs::write(
+        output_dir.join("n_cube_3_boundary_minus_0_embedding_compass_spring.dot"),
+        embedding_to_dot(&minus_0_embedding, Renderer::CompassSpring),
+    )?;
+
+    let (minus_0_minus_1_domain, minus_0_minus_1_embedding) =
+        boundary(Sign::Input, 1, &minus_0_boundary);
+    let minus_0_minus_1_composite =
+        Embedding::compose(&minus_0_minus_1_embedding, &minus_0_embedding);
+    fs::write(
+        output_dir.join("n_cube_3_boundary_minus_0_minus_1_composite_compass_spring.dot"),
+        embedding_to_dot(&minus_0_minus_1_composite, Renderer::CompassSpring),
+    )?;
+
+    let (minus_1_boundary, minus_1_embedding) = boundary(Sign::Input, 1, &three_cube);
+    let (minus_1_minus_0_domain, minus_1_minus_0_embedding) =
+        boundary(Sign::Input, 0, &minus_1_boundary);
+    let minus_1_minus_0_composite =
+        Embedding::compose(&minus_1_minus_0_embedding, &minus_1_embedding);
+
+    assert!(Embedding::equal(
+        &minus_0_minus_1_composite,
+        &minus_1_minus_0_composite
+    ));
+    assert!(FramedPoset::equal(
+        &minus_0_minus_1_domain,
+        &minus_1_minus_0_domain
+    ));
+
+    fs::write(
+        output_dir.join("n_cube_3_boundary_minus_1_minus_0_composite_compass_spring.dot"),
+        embedding_to_dot(&minus_1_minus_0_composite, Renderer::CompassSpring),
+    )?;
 
     Ok(())
 }
@@ -43,14 +82,14 @@ fn write_boundary(
     let (domain, embedding) = boundary(sign, direction, shape);
     fs::write(
         output_dir.join(format!("two_direction_square_boundary_{}.dot", name)),
-        to_dot(&domain),
+        to_dot(&domain, Renderer::Ranked),
     )?;
     fs::write(
         output_dir.join(format!(
             "two_direction_square_boundary_{}_embedding.dot",
             name
         )),
-        embedding_to_dot(&embedding),
+        embedding_to_dot(&embedding, Renderer::Ranked),
     )
 }
 

@@ -21,6 +21,11 @@ fi
 for dot_file in "${dot_files[@]}"; do
     svg_file="${dot_file%.dot}.svg"
 
+    if [[ -e "$svg_file" && ! "$dot_file" -nt "$svg_file" ]]; then
+        echo "skipped $svg_file"
+        continue
+    fi
+
     if grep -q 'layout=neato' "$dot_file"; then
         neato -n2 -Tsvg "$dot_file" -o "$svg_file"
     else

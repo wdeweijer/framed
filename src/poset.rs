@@ -35,6 +35,82 @@ pub struct FramedPoset {
     pub(crate) cofaces_out: Vec<Vec<IntSet>>,
 }
 
+/// A subset of cells of a framed poset.
+///
+/// The `keep` table is indexed by basis cardinality and then cell position,
+/// matching [`FramedPoset`]'s internal tables.
+#[derive(Debug, Clone)]
+pub struct FramedPosetSubset {
+    pub shape: Arc<FramedPoset>,
+    pub keep: Vec<Vec<bool>>,
+}
+
+impl FramedPosetSubset {
+    /// Construct a subset from a shape and a keep table.
+    pub fn make(shape: Arc<FramedPoset>, keep: Vec<Vec<bool>>) -> Self {
+        let subset = Self { shape, keep };
+        debug_assert!(subset.well_formed());
+        subset
+    }
+
+    /// The image subset of an embedding in its codomain.
+    pub fn from_embedding(embedding: &Embedding) -> Self {
+        let keep = embedding
+            .inv
+            .iter()
+            .map(|row| row.iter().map(|&x| x != NO_PREIMAGE).collect())
+            .collect();
+        Self::make(Arc::clone(&embedding.cod), keep)
+    }
+
+    /// True when the subset contains a given cell.
+    pub fn contains(&self, dim: usize, pos: usize) -> bool {
+        self.keep
+            .get(dim)
+            .and_then(|row| row.get(pos))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Smallest closed subset containing this subset.
+    pub fn free_closure(&self) -> Self {
+        debug_assert!(self.well_formed());
+        let mut keep = self.keep.clone();
+
+        for dim in (1..keep.len()).rev() {
+            for pos in 0..keep[dim].len() {
+                if !keep[dim][pos] {
+                    continue;
+                }
+                for face in self.shape.faces_all(dim, pos) {
+                    keep[dim - 1][face] = true;
+                }
+            }
+        }
+
+        Self::make(Arc::clone(&self.shape), keep)
+    }
+
+    /// True when every face of every subset cell is again in the subset.
+    pub fn is_closed(&self) -> bool {
+        if !self.well_formed() {
+            return false;
+        }
+
+        self.keep == self.free_closure().keep
+    }
+
+    fn well_formed(&self) -> bool {
+        let sizes = self.shape.sizes();
+        self.keep.len() == sizes.len()
+            && self
+                .keep
+                .iter()
+                .zip(sizes)
+                .all(|(row, size)| row.len() == size)
+    }
+}
+
 impl FramedPoset {
     /// Construct a framed poset from basis and adjacency tables.
     pub fn make(
@@ -148,14 +224,8 @@ impl FramedPoset {
     }
 
     /// Render this poset's Hasse diagram as Graphviz DOT.
-    pub fn to_dot(&self) -> String {
-        crate::dot::to_dot(self)
-    }
-
-    /// Render this poset as DOT with node coordinates fixed by the compass
-    /// spring layout.
-    pub fn to_compass_spring_dot(&self) -> String {
-        crate::dot::to_compass_spring_dot(self)
+    pub fn to_dot(&self, renderer: crate::dot::Renderer) -> String {
+        crate::dot::to_dot(self, renderer)
     }
 
     fn faces_all(&self, dim: usize, pos: usize) -> IntSet {
@@ -267,46 +337,52 @@ pub fn boundary(
     direction: usize,
     shape: &Arc<FramedPoset>,
 ) -> (Arc<FramedPoset>, Embedding) {
-    if shape.dim < 0 {
-        return (
+    let result = if shape.dim < 0 {
+        (
             Arc::new(FramedPoset::empty()),
             Embedding::empty(Arc::clone(shape)),
-        );
-    }
+        )
+    } else {
+        let levels = shape.basis.len();
+        let mut keep: Vec<Vec<bool>> = shape
+            .basis
+            .iter()
+            .map(|level| vec![false; level.len()])
+            .collect();
 
-    let levels = shape.basis.len();
-    let mut keep: Vec<Vec<bool>> = shape
-        .basis
-        .iter()
-        .map(|level| vec![false; level.len()])
-        .collect();
-
-    let opposite = sign.opposite();
-    for dim in 0..levels {
-        for pos in 0..shape.basis[dim].len() {
-            if shape.is_orthogonal_to(dim, pos, direction)
-                && shape.cofaces_of(opposite, dim, pos).is_empty()
-            {
-                keep[dim][pos] = true;
+        let opposite = sign.opposite();
+        for dim in 0..levels {
+            for pos in 0..shape.basis[dim].len() {
+                if shape.is_orthogonal_to(dim, pos, direction)
+                    && shape.cofaces_of(opposite, dim, pos).is_empty()
+                {
+                    keep[dim][pos] = true;
+                }
             }
         }
-    }
 
-    for dim in (1..levels).rev() {
-        for pos in 0..shape.basis[dim].len() {
-            if !keep[dim][pos] {
-                continue;
-            }
-            for face in shape.faces_all(dim, pos) {
-                keep[dim - 1][face] = true;
+        for dim in (1..levels).rev() {
+            for pos in 0..shape.basis[dim].len() {
+                if !keep[dim][pos] {
+                    continue;
+                }
+                for face in shape.faces_all(dim, pos) {
+                    keep[dim - 1][face] = true;
+                }
             }
         }
-    }
 
-    restrict(shape, &keep)
+        let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
+        restrict(&subset)
+    };
+
+    debug_assert!(result.1.is_closed());
+    result
 }
 
-fn restrict(shape: &Arc<FramedPoset>, keep: &[Vec<bool>]) -> (Arc<FramedPoset>, Embedding) {
+fn restrict(subset: &FramedPosetSubset) -> (Arc<FramedPoset>, Embedding) {
+    let shape = &subset.shape;
+    let keep = &subset.keep;
     let sizes = shape.sizes();
     let top_dim = keep
         .iter()
@@ -319,7 +395,7 @@ fn restrict(shape: &Arc<FramedPoset>, keep: &[Vec<bool>]) -> (Arc<FramedPoset>, 
     if top_dim < 0 {
         return (
             Arc::new(FramedPoset::empty()),
-            Embedding::empty(Arc::clone(shape)),
+            Embedding::empty(Arc::clone(&subset.shape)),
         );
     }
 
@@ -403,7 +479,7 @@ fn restrict(shape: &Arc<FramedPoset>, keep: &[Vec<bool>]) -> (Arc<FramedPoset>, 
         cofaces_in,
         cofaces_out,
     ));
-    let emb = Embedding::make(Arc::clone(&sub), Arc::clone(shape), map, inv);
+    let emb = Embedding::make(Arc::clone(&sub), Arc::clone(&subset.shape), map, inv);
     (sub, emb)
 }
 
@@ -459,6 +535,35 @@ mod tests {
         assert_eq!(arrow.cofaces_of(Sign::Input, 0, 1), &Vec::<usize>::new());
         assert_eq!(arrow.cofaces_of(Sign::Output, 0, 0), &Vec::<usize>::new());
         assert_eq!(arrow.cofaces_of(Sign::Output, 0, 1), &vec![0]);
+    }
+
+    #[test]
+    fn subset_closedness_checks_faces() {
+        let arrow = tight_arrow();
+
+        let endpoint =
+            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![true, false], vec![false]]);
+        assert!(endpoint.is_closed());
+        assert_eq!(endpoint.free_closure().keep, endpoint.keep);
+
+        let open_edge =
+            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![false, false], vec![true]]);
+        assert!(!open_edge.is_closed());
+        assert_eq!(
+            open_edge.free_closure().keep,
+            vec![vec![true, true], vec![true]]
+        );
+    }
+
+    #[test]
+    fn subset_from_embedding_marks_image_cells() {
+        let arrow = tight_arrow();
+        let (_, input_embedding) = boundary(Sign::Input, 0, &arrow);
+        let subset = FramedPosetSubset::from_embedding(&input_embedding);
+
+        assert!(subset.contains(0, 0));
+        assert!(!subset.contains(0, 1));
+        assert!(subset.is_closed());
     }
 
     #[test]
