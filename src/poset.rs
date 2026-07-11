@@ -196,6 +196,13 @@ impl FramedPoset {
 
         for dim in 0..levels {
             for pos in 0..self.basis[dim].len() {
+                if self.faces_in[dim][pos]
+                    .iter()
+                    .any(|face| self.faces_out[dim][pos].contains(face))
+                {
+                    return false;
+                }
+
                 if dim == 0
                     && (!self.faces_in[dim][pos].is_empty() || !self.faces_out[dim][pos].is_empty())
                 {
@@ -452,6 +459,20 @@ mod tests {
         assert_eq!(arrow.cofaces_of(Sign::Input, 0, 1), &Vec::<usize>::new());
         assert_eq!(arrow.cofaces_of(Sign::Output, 0, 0), &Vec::<usize>::new());
         assert_eq!(arrow.cofaces_of(Sign::Output, 0, 1), &vec![0]);
+    }
+
+    #[test]
+    fn well_formed_rejects_signed_face_overlap() {
+        let poset = FramedPoset {
+            dim: 1,
+            basis: vec![vec![vec![]], vec![vec![0]]],
+            faces_in: vec![vec![vec![]], vec![vec![0]]],
+            faces_out: vec![vec![vec![]], vec![vec![0]]],
+            cofaces_in: vec![vec![vec![0]], vec![vec![]]],
+            cofaces_out: vec![vec![vec![0]], vec![vec![]]],
+        };
+
+        assert!(!poset.well_formed());
     }
 
     #[test]
