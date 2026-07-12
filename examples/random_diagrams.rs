@@ -9,11 +9,10 @@ use ofposets::{
     Embedding, FramedPoset, FramedPosetSubset, Renderer, Sign, boundary, embedding_to_dot,
     random_framed_poset, to_dot,
 };
-use rand::SeedableRng;
-use rand::rngs::SmallRng;
+use rand::rngs::{OsRng, SmallRng};
+use rand::{SeedableRng, TryRngCore};
 
 const CELL_COUNT: usize = 10;
-const SEED: u64 = 0xc0b1_ca1e_2026_0712;
 const SIGN_PAIRS: [(Sign, Sign); 4] = [
     (Sign::Input, Sign::Input),
     (Sign::Input, Sign::Output),
@@ -32,6 +31,7 @@ struct SearchMatch {
 }
 
 fn main() -> std::io::Result<()> {
+    let seed = OsRng.try_next_u64().map_err(std::io::Error::other)?;
     let worker_count = thread::available_parallelism()?.get();
     let found = Arc::new(AtomicBool::new(false));
     let attempts = Arc::new(AtomicUsize::new(0));
@@ -42,7 +42,7 @@ fn main() -> std::io::Result<()> {
             let found = Arc::clone(&found);
             let attempts = Arc::clone(&attempts);
             let sender = sender.clone();
-            scope.spawn(move || search_worker(worker, found, attempts, sender));
+            scope.spawn(move || search_worker(worker, seed, found, attempts, sender));
         }
         drop(sender);
 
@@ -67,9 +67,9 @@ fn main() -> std::io::Result<()> {
         fs::remove_dir_all(output_dir)?;
     }
     fs::create_dir_all(output_dir)?;
-    write_match(output_dir, worker_count, candidate_count, &matched)?;
+    write_match(output_dir, seed, worker_count, candidate_count, &matched)?;
     println!(
-        "found a matching cubular OFP after checking {candidate_count} candidates with {worker_count} workers; worker {} found ({}, {})",
+        "found a matching cubular OFP with seed {seed:#018x} after checking {candidate_count} candidates with {worker_count} workers; worker {} found ({}, {})",
         matched.worker + 1,
         sign_name(matched.sign_0),
         sign_name(matched.sign_1)
@@ -79,11 +79,12 @@ fn main() -> std::io::Result<()> {
 
 fn search_worker(
     worker: usize,
+    seed: u64,
     found: Arc<AtomicBool>,
     attempts: Arc<AtomicUsize>,
     sender: mpsc::Sender<SearchMatch>,
 ) {
-    let mut rng = SmallRng::seed_from_u64(worker_seed(worker));
+    let mut rng = SmallRng::seed_from_u64(worker_seed(seed, worker));
 
     while !found.load(Ordering::Acquire) {
         let candidate = attempts.fetch_add(1, Ordering::Relaxed) + 1;
@@ -123,8 +124,8 @@ fn search_worker(
     }
 }
 
-fn worker_seed(worker: usize) -> u64 {
-    SEED ^ (worker as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+fn worker_seed(seed: u64, worker: usize) -> u64 {
+    seed ^ (worker as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
 fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
@@ -155,6 +156,7 @@ fn boundary_intersection_embeddings(
 
 fn write_match(
     output_dir: &Path,
+    seed: u64,
     worker_count: usize,
     candidate_count: usize,
     matched: &SearchMatch,
@@ -185,7 +187,7 @@ fn write_match(
     fs::write(
         output_dir.join("match.txt"),
         format!(
-            "candidate_ticket\t{}\ncandidates_checked\t{candidate_count}\nworker\t{}\nworkers\t{worker_count}\nsign_0\t{sign_0}\nsign_1\t{sign_1}\n",
+            "seed\t{seed:#018x}\ncandidate_ticket\t{}\ncandidates_checked\t{candidate_count}\nworker\t{}\nworkers\t{worker_count}\nsign_0\t{sign_0}\nsign_1\t{sign_1}\n",
             matched.candidate,
             matched.worker + 1
         ),
