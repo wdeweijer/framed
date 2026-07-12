@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::Duration;
 
 use ofposets::{
     Embedding, FramedPoset, FramedPosetSubset, Renderer, Sign, boundary, embedding_to_dot,
@@ -18,22 +21,79 @@ const SIGN_PAIRS: [(Sign, Sign); 4] = [
     (Sign::Output, Sign::Output),
 ];
 
+struct SearchMatch {
+    worker: usize,
+    candidate: usize,
+    shape: Arc<FramedPoset>,
+    sign_0: Sign,
+    sign_1: Sign,
+    iterated: Embedding,
+    intersection: Embedding,
+}
+
 fn main() -> std::io::Result<()> {
+    let worker_count = thread::available_parallelism()?.get();
+    let found = Arc::new(AtomicBool::new(false));
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let (sender, receiver) = mpsc::channel();
+
+    let matched = thread::scope(|scope| {
+        for worker in 0..worker_count {
+            let found = Arc::clone(&found);
+            let attempts = Arc::clone(&attempts);
+            let sender = sender.clone();
+            scope.spawn(move || search_worker(worker, found, attempts, sender));
+        }
+        drop(sender);
+
+        loop {
+            match receiver.recv_timeout(Duration::from_secs(1)) {
+                Ok(matched) => break Ok(matched),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    println!("samples taken: {}", attempts.load(Ordering::Relaxed));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    break Err(std::io::Error::other(
+                        "all search workers stopped without a match",
+                    ));
+                }
+            }
+        }
+    })?;
+    let candidate_count = attempts.load(Ordering::Relaxed);
+
     let output_dir = Path::new("visualizations/random_10_cells_intersection_subset_search");
     if output_dir.exists() {
         fs::remove_dir_all(output_dir)?;
     }
     fs::create_dir_all(output_dir)?;
+    write_match(output_dir, worker_count, candidate_count, &matched)?;
+    println!(
+        "found a matching cubular OFP after checking {candidate_count} candidates with {worker_count} workers; worker {} found ({}, {})",
+        matched.worker + 1,
+        sign_name(matched.sign_0),
+        sign_name(matched.sign_1)
+    );
+    Ok(())
+}
 
-    let mut rng = SmallRng::seed_from_u64(SEED);
-    for candidate in 1usize.. {
-        let poset = Arc::new(random_framed_poset(CELL_COUNT, &mut rng));
-        if !is_cubular(&poset) {
+fn search_worker(
+    worker: usize,
+    found: Arc<AtomicBool>,
+    attempts: Arc<AtomicUsize>,
+    sender: mpsc::Sender<SearchMatch>,
+) {
+    let mut rng = SmallRng::seed_from_u64(worker_seed(worker));
+
+    while !found.load(Ordering::Acquire) {
+        let candidate = attempts.fetch_add(1, Ordering::Relaxed) + 1;
+        let shape = Arc::new(random_framed_poset(CELL_COUNT, &mut rng));
+        if !is_cubular(&shape) {
             continue;
         }
 
         for (sign_0, sign_1) in SIGN_PAIRS {
-            let (iterated, intersection) = boundary_intersection_embeddings(&poset, sign_0, sign_1);
+            let (iterated, intersection) = boundary_intersection_embeddings(&shape, sign_0, sign_1);
             if Embedding::equal(&iterated, &intersection) {
                 continue;
             }
@@ -44,25 +104,27 @@ fn main() -> std::io::Result<()> {
                 continue;
             }
 
-            write_match(
-                output_dir,
-                candidate,
-                &poset,
-                sign_0,
-                sign_1,
-                &iterated,
-                &intersection,
-            )?;
-            println!(
-                "found a matching cubular OFP after {candidate} candidates for ({}, {})",
-                sign_name(sign_0),
-                sign_name(sign_1)
-            );
-            return Ok(());
+            if found
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                let _ = sender.send(SearchMatch {
+                    worker,
+                    candidate,
+                    shape,
+                    sign_0,
+                    sign_1,
+                    iterated,
+                    intersection,
+                });
+            }
+            return;
         }
     }
+}
 
-    unreachable!("the unbounded candidate iterator cannot terminate")
+fn worker_seed(worker: usize) -> u64 {
+    SEED ^ (worker as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
 fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
@@ -93,38 +155,40 @@ fn boundary_intersection_embeddings(
 
 fn write_match(
     output_dir: &Path,
-    candidate: usize,
-    shape: &Arc<FramedPoset>,
-    sign_0: Sign,
-    sign_1: Sign,
-    iterated: &Embedding,
-    intersection: &Embedding,
+    worker_count: usize,
+    candidate_count: usize,
+    matched: &SearchMatch,
 ) -> std::io::Result<()> {
     fs::write(
         output_dir.join("sample.dot"),
-        to_dot(shape.as_ref(), Renderer::CompassSpring),
+        to_dot(matched.shape.as_ref(), Renderer::CompassSpring),
     )?;
     fs::write(
         output_dir.join("sample_graded.dot"),
-        to_dot(shape.as_ref(), Renderer::Ranked),
+        to_dot(matched.shape.as_ref(), Renderer::Ranked),
     )?;
 
-    let serialized = serde_json::to_string_pretty(shape.as_ref()).map_err(std::io::Error::other)?;
+    let serialized =
+        serde_json::to_string_pretty(matched.shape.as_ref()).map_err(std::io::Error::other)?;
     fs::write(
         output_dir.join("sample.ofp.json"),
         format!("{serialized}\n"),
     )?;
 
-    let sign_0 = sign_file_name(sign_0);
-    let sign_1 = sign_file_name(sign_1);
+    let sign_0 = sign_file_name(matched.sign_0);
+    let sign_1 = sign_file_name(matched.sign_1);
     let iterated_name = format!("{sign_0}_0_{sign_1}_1");
     let intersection_name = format!("{sign_0}_0_intersection_{sign_1}_1");
 
-    write_embedding_layouts(output_dir, &iterated_name, iterated)?;
-    write_embedding_layouts(output_dir, &intersection_name, intersection)?;
+    write_embedding_layouts(output_dir, &iterated_name, &matched.iterated)?;
+    write_embedding_layouts(output_dir, &intersection_name, &matched.intersection)?;
     fs::write(
         output_dir.join("match.txt"),
-        format!("candidate\t{candidate}\nsign_0\t{sign_0}\nsign_1\t{sign_1}\n"),
+        format!(
+            "candidate_ticket\t{}\ncandidates_checked\t{candidate_count}\nworker\t{}\nworkers\t{worker_count}\nsign_0\t{sign_0}\nsign_1\t{sign_1}\n",
+            matched.candidate,
+            matched.worker + 1
+        ),
     )
 }
 
