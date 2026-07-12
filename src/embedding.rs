@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::intset;
-use crate::poset::{FramedPoset, Sign};
+use crate::poset::{FramedPoset, FramedPosetSubset, Sign, closure};
 
 /// Sentinel stored in inverse maps when a codomain cell has no preimage.
 pub const NO_PREIMAGE: usize = usize::MAX;
@@ -21,6 +21,28 @@ pub struct Embedding {
     pub cod: Arc<FramedPoset>,
     pub map: Vec<Vec<usize>>,
     pub inv: Vec<Vec<usize>>,
+}
+
+/// Intersection of two closed embeddings into a common codomain.
+#[derive(Debug, Clone)]
+pub struct EmbeddingIntersection {
+    /// The closed intersection embedding into the original common codomain.
+    pub into_codomain: Embedding,
+    /// The embedding from the intersection into the left domain.
+    pub into_left: Embedding,
+    /// The embedding from the intersection into the right domain.
+    pub into_right: Embedding,
+}
+
+/// Union of two closed embeddings into a common codomain.
+#[derive(Debug, Clone)]
+pub struct EmbeddingUnion {
+    /// The closed union embedding into the original common codomain.
+    pub into_codomain: Embedding,
+    /// The embedding from the left domain into the union.
+    pub left_into_union: Embedding,
+    /// The embedding from the right domain into the union.
+    pub right_into_union: Embedding,
 }
 
 impl Embedding {
@@ -95,6 +117,40 @@ impl Embedding {
             .collect();
 
         Self::make(Arc::clone(&f.dom), Arc::clone(&g.cod), map, inv)
+    }
+
+    /// Intersection of two closed embeddings into a common codomain.
+    pub fn intersection(a: &Self, b: &Self) -> EmbeddingIntersection {
+        let into_codomain = closed_image_combination(a, b, |x, y| x && y);
+        let into_left = common_subobject_to_argument(&into_codomain, a);
+        let into_right = common_subobject_to_argument(&into_codomain, b);
+
+        debug_assert!(into_codomain.is_closed());
+        debug_assert!(into_left.is_closed());
+        debug_assert!(into_right.is_closed());
+
+        EmbeddingIntersection {
+            into_codomain,
+            into_left,
+            into_right,
+        }
+    }
+
+    /// Union of two closed embeddings into a common codomain.
+    pub fn union(a: &Self, b: &Self) -> EmbeddingUnion {
+        let into_codomain = closed_image_combination(a, b, |x, y| x || y);
+        let left_into_union = argument_to_common_subobject(a, &into_codomain);
+        let right_into_union = argument_to_common_subobject(b, &into_codomain);
+
+        debug_assert!(into_codomain.is_closed());
+        debug_assert!(left_into_union.is_closed());
+        debug_assert!(right_into_union.is_closed());
+
+        EmbeddingUnion {
+            into_codomain,
+            left_into_union,
+            right_into_union,
+        }
     }
 
     /// Equality as subobjects of a common codomain.
@@ -198,6 +254,112 @@ impl Embedding {
     }
 }
 
+fn closed_image_combination(
+    a: &Embedding,
+    b: &Embedding,
+    combine: impl Fn(bool, bool) -> bool,
+) -> Embedding {
+    assert!(
+        FramedPoset::equal(&a.cod, &b.cod),
+        "embeddings must have equal codomains"
+    );
+    debug_assert!(a.is_closed(), "left embedding must be closed");
+    debug_assert!(b.is_closed(), "right embedding must be closed");
+
+    let keep = a
+        .cod
+        .sizes()
+        .iter()
+        .enumerate()
+        .map(|(dim, &n)| {
+            (0..n)
+                .map(|pos| {
+                    combine(
+                        a.inv[dim][pos] != NO_PREIMAGE,
+                        b.inv[dim][pos] != NO_PREIMAGE,
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    let subset = FramedPosetSubset::make(Arc::clone(&a.cod), keep);
+    let (_, embedding) = closure(&subset);
+    debug_assert!(embedding.is_closed());
+    embedding
+}
+
+fn common_subobject_to_argument(subobject: &Embedding, argument: &Embedding) -> Embedding {
+    let map: Vec<Vec<usize>> = subobject
+        .map
+        .iter()
+        .enumerate()
+        .map(|(dim, row)| {
+            row.iter()
+                .map(|&cod_pos| {
+                    let argument_pos = argument.inv[dim][cod_pos];
+                    assert!(argument_pos != NO_PREIMAGE);
+                    argument_pos
+                })
+                .collect()
+        })
+        .collect();
+    let mut inv: Vec<Vec<usize>> = argument
+        .dom
+        .sizes()
+        .iter()
+        .map(|&n| vec![NO_PREIMAGE; n])
+        .collect();
+
+    for (dim, row) in map.iter().enumerate() {
+        for (subobject_pos, &argument_pos) in row.iter().enumerate() {
+            inv[dim][argument_pos] = subobject_pos;
+        }
+    }
+
+    Embedding::make(
+        Arc::clone(&subobject.dom),
+        Arc::clone(&argument.dom),
+        map,
+        inv,
+    )
+}
+
+fn argument_to_common_subobject(argument: &Embedding, subobject: &Embedding) -> Embedding {
+    let map: Vec<Vec<usize>> = argument
+        .map
+        .iter()
+        .enumerate()
+        .map(|(dim, row)| {
+            row.iter()
+                .map(|&cod_pos| {
+                    let subobject_pos = subobject.inv[dim][cod_pos];
+                    assert!(subobject_pos != NO_PREIMAGE);
+                    subobject_pos
+                })
+                .collect()
+        })
+        .collect();
+    let mut inv: Vec<Vec<usize>> = subobject
+        .dom
+        .sizes()
+        .iter()
+        .map(|&n| vec![NO_PREIMAGE; n])
+        .collect();
+
+    for (dim, row) in map.iter().enumerate() {
+        for (argument_pos, &subobject_pos) in row.iter().enumerate() {
+            inv[dim][subobject_pos] = argument_pos;
+        }
+    }
+
+    Embedding::make(
+        Arc::clone(&argument.dom),
+        Arc::clone(&subobject.dom),
+        map,
+        inv,
+    )
+}
+
 fn image_cells(embedding: &Embedding) -> HashSet<(usize, usize)> {
     embedding
         .map
@@ -239,6 +401,7 @@ fn image_edges(embedding: &Embedding) -> HashSet<(Sign, usize, usize, usize, usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::poset::boundary;
 
     fn point() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::point())
@@ -381,6 +544,54 @@ mod tests {
 
         assert_eq!(embedding.map, Embedding::id(Arc::clone(&embedding.cod)).map);
         assert!(!embedding.is_closed());
+    }
+
+    #[test]
+    fn intersection_returns_maps_to_both_arguments() {
+        let cod = square();
+        let (_, left) = boundary(Sign::Input, 0, &cod);
+        let (_, bottom) = boundary(Sign::Input, 1, &cod);
+
+        let intersection = Embedding::intersection(&left, &bottom);
+
+        assert_eq!(intersection.into_codomain.map, vec![vec![0]]);
+        assert_eq!(intersection.into_left.map, vec![vec![0]]);
+        assert_eq!(intersection.into_right.map, vec![vec![0]]);
+        assert!(intersection.into_codomain.is_closed());
+        assert!(intersection.into_left.is_closed());
+        assert!(intersection.into_right.is_closed());
+        assert!(Embedding::equal(
+            &Embedding::compose(&intersection.into_left, &left),
+            &intersection.into_codomain,
+        ));
+        assert!(Embedding::equal(
+            &Embedding::compose(&intersection.into_right, &bottom),
+            &intersection.into_codomain,
+        ));
+    }
+
+    #[test]
+    fn union_returns_maps_from_both_arguments() {
+        let cod = square();
+        let (_, left) = boundary(Sign::Input, 0, &cod);
+        let (_, bottom) = boundary(Sign::Input, 1, &cod);
+
+        let union = Embedding::union(&left, &bottom);
+
+        assert_eq!(union.into_codomain.map, vec![vec![0, 1, 2], vec![0, 2]]);
+        assert_eq!(union.left_into_union.map, vec![vec![0, 2], vec![1]]);
+        assert_eq!(union.right_into_union.map, vec![vec![0, 1], vec![0]]);
+        assert!(union.into_codomain.is_closed());
+        assert!(union.left_into_union.is_closed());
+        assert!(union.right_into_union.is_closed());
+        assert!(Embedding::equal(
+            &Embedding::compose(&union.left_into_union, &union.into_codomain),
+            &left,
+        ));
+        assert!(Embedding::equal(
+            &Embedding::compose(&union.right_into_union, &union.into_codomain),
+            &bottom,
+        ));
     }
 
     #[test]

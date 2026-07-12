@@ -238,6 +238,14 @@ impl FramedPoset {
 
         for dim in 0..levels {
             for pos in 0..self.basis[dim].len() {
+                if !intset::is_sorted_unique(&self.faces_in[dim][pos])
+                    || !intset::is_sorted_unique(&self.faces_out[dim][pos])
+                    || !intset::is_sorted_unique(&self.cofaces_in[dim][pos])
+                    || !intset::is_sorted_unique(&self.cofaces_out[dim][pos])
+                {
+                    return false;
+                }
+
                 if self.faces_in[dim][pos]
                     .iter()
                     .any(|face| self.faces_out[dim][pos].contains(face))
@@ -252,10 +260,6 @@ impl FramedPoset {
                 }
 
                 if dim > 0 {
-                    if self.faces_in[dim][pos].is_empty() && self.faces_out[dim][pos].is_empty() {
-                        return false;
-                    }
-
                     for &face in &self.faces_in[dim][pos] {
                         if !self.valid_face(dim, pos, face)
                             || !self.cofaces_in[dim - 1][face].contains(&pos)
@@ -269,6 +273,20 @@ impl FramedPoset {
                         {
                             return false;
                         }
+                    }
+
+                    // Closedness of the basis map is equivalent, in this
+                    // finite ranked representation, to realizing every
+                    // immediate face of this cell's basis.
+                    if self.basis[dim][pos].iter().any(|direction| {
+                        !self.faces_in[dim][pos]
+                            .iter()
+                            .chain(&self.faces_out[dim][pos])
+                            .any(|&face| {
+                                self.basis[dim - 1][face].binary_search(direction).is_err()
+                            })
+                    }) {
+                        return false;
                     }
                 }
 
@@ -337,26 +355,39 @@ pub fn boundary(
             }
         }
 
-        for dim in (1..levels).rev() {
-            for pos in 0..shape.basis[dim].len() {
-                if !keep[dim][pos] {
-                    continue;
-                }
-                for face in shape.faces_all(dim, pos) {
-                    keep[dim - 1][face] = true;
-                }
-            }
-        }
-
         let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
-        restrict(&subset)
+        closure(&subset)
     };
 
     debug_assert!(result.1.is_closed());
     result
 }
 
-fn restrict(subset: &FramedPosetSubset) -> (Arc<FramedPoset>, Embedding) {
+/// Compute the smallest closed embedding whose image contains `subset`.
+pub fn closure(subset: &FramedPosetSubset) -> (Arc<FramedPoset>, Embedding) {
+    debug_assert!(subset.well_formed());
+
+    let shape = &subset.shape;
+    let mut keep = subset.keep.clone();
+
+    for dim in (1..keep.len()).rev() {
+        for pos in 0..keep[dim].len() {
+            if !keep[dim][pos] {
+                continue;
+            }
+            for face in shape.faces_all(dim, pos) {
+                keep[dim - 1][face] = true;
+            }
+        }
+    }
+
+    let closed_subset = FramedPosetSubset::make(Arc::clone(shape), keep);
+    let result = embedding_from_closed_subset(&closed_subset);
+    debug_assert!(result.1.is_closed());
+    result
+}
+
+fn embedding_from_closed_subset(subset: &FramedPosetSubset) -> (Arc<FramedPoset>, Embedding) {
     let shape = &subset.shape;
     let keep = &subset.keep;
     let sizes = shape.sizes();
@@ -524,6 +555,45 @@ mod tests {
     }
 
     #[test]
+    fn closure_adds_missing_faces_and_returns_closed_embedding() {
+        let arrow = tight_arrow();
+        let subset =
+            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![false, false], vec![true]]);
+
+        let (closed, embedding) = closure(&subset);
+
+        assert_eq!(closed.sizes(), vec![2, 1]);
+        assert!(embedding.is_closed());
+        assert!(Embedding::equal(&embedding, &Embedding::id(arrow)));
+    }
+
+    #[test]
+    fn closure_of_closed_embedding_subset_is_equal_to_original() {
+        let square = square();
+        let (_, original) = boundary(Sign::Input, 0, &square);
+        let subset = FramedPosetSubset::from_embedding(&original);
+
+        let (_, closed) = closure(&subset);
+
+        assert!(original.is_closed());
+        assert!(closed.is_closed());
+        assert!(Embedding::equal(&closed, &original));
+    }
+
+    #[test]
+    fn closure_of_empty_subset_is_empty_embedding() {
+        let arrow = tight_arrow();
+        let subset =
+            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![false, false], vec![false]]);
+
+        let (closed, embedding) = closure(&subset);
+
+        assert_eq!(closed.sizes(), Vec::<usize>::new());
+        assert_eq!(embedding.map, Vec::<Vec<usize>>::new());
+        assert!(embedding.is_closed());
+    }
+
+    #[test]
     fn well_formed_rejects_signed_face_overlap() {
         let poset = FramedPoset {
             dim: 1,
@@ -545,6 +615,48 @@ mod tests {
             faces_in: vec![vec![vec![]], vec![vec![]]],
             faces_out: vec![vec![vec![]], vec![vec![]]],
             cofaces_in: vec![vec![vec![]], vec![vec![]]],
+            cofaces_out: vec![vec![vec![]], vec![vec![]]],
+        };
+
+        assert!(!poset.well_formed());
+    }
+
+    #[test]
+    fn well_formed_rejects_non_closed_basis_map() {
+        let poset = FramedPoset {
+            dim: 2,
+            basis: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
+            faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0]]],
+            faces_out: vec![vec![vec![]], vec![vec![], vec![]], vec![vec![]]],
+            cofaces_in: vec![vec![vec![0, 1]], vec![vec![0], vec![]], vec![vec![]]],
+            cofaces_out: vec![vec![vec![]], vec![vec![], vec![]], vec![vec![]]],
+        };
+
+        assert!(!poset.well_formed());
+    }
+
+    #[test]
+    fn well_formed_accepts_one_sided_faces_over_every_basis_face() {
+        let poset = FramedPoset {
+            dim: 2,
+            basis: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
+            faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0, 1]]],
+            faces_out: vec![vec![vec![]], vec![vec![], vec![]], vec![vec![]]],
+            cofaces_in: vec![vec![vec![0, 1]], vec![vec![0], vec![0]], vec![vec![]]],
+            cofaces_out: vec![vec![vec![]], vec![vec![], vec![]], vec![vec![]]],
+        };
+
+        assert!(poset.well_formed());
+    }
+
+    #[test]
+    fn well_formed_rejects_duplicate_adjacency() {
+        let poset = FramedPoset {
+            dim: 1,
+            basis: vec![vec![vec![]], vec![vec![0]]],
+            faces_in: vec![vec![vec![]], vec![vec![0, 0]]],
+            faces_out: vec![vec![vec![]], vec![vec![]]],
+            cofaces_in: vec![vec![vec![0]], vec![vec![]]],
             cofaces_out: vec![vec![vec![]], vec![vec![]]],
         };
 
