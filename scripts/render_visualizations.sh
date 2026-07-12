@@ -10,8 +10,9 @@ if [[ ! -d "$visualizations_dir" ]]; then
     exit 1
 fi
 
-shopt -s nullglob
-dot_files=("$visualizations_dir"/*.dot)
+mapfile -d '' -t dot_files < <(
+    find "$visualizations_dir" -type f -name '*.dot' -print0 | sort -z
+)
 
 if (( ${#dot_files[@]} == 0 )); then
     echo "no .dot files found in $visualizations_dir"

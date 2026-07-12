@@ -1,3 +1,6 @@
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
+
 /// A handful of arbitrary-length vector operations. Vectors are plain
 /// `Vec<f64>`; every function just assumes its arguments have the same
 /// length rather than assuming any particular dimension.
@@ -95,29 +98,43 @@ pub struct SimParams {
     pub steps: usize,
 }
 
+/// Cabinet projection angles used for the first six directions.
+pub const PRESET_ANGLES_DEGREES: [f64; 6] = [0.0, 90.0, 33.0, 6.0, 80.0, 3.0];
+
+/// Cabinet projection scales used for the first six directions.
+pub const PRESET_SCALES: [f64; 6] = [1.5, 1.5, 1.0, 4.1, 4.1, 10.0];
+
+const INITIAL_POSITION_SEED: u64 = 0x5eed_c0de_5eed_c0de;
+
 impl Default for SimParams {
     fn default() -> Self {
         SimParams {
             edge_length: 100.0,
             spring_k: 0.06,
-            repulsion: 6000.0,
-            damping: 0.82,
+            repulsion: 3500.0,
+            damping: 0.70,
             center_k: 0.004,
             steps: 1000,
         }
     }
 }
 
-/// Initial layout: nodes placed evenly spaced along a straight line (the
-/// first axis), `spacing` apart, centered on the origin. Every other axis
-/// starts at zero.
-fn line_start(node_count: usize, dim: usize, spacing: f64) -> Vec<Vec<f64>> {
-    let offset = spacing * (node_count as f64 - 1.0) / 2.0;
+/// Deterministic random initial layout in every simulation dimension.
+fn random_start(node_count: usize, dim: usize, radius: f64) -> Vec<Vec<f64>> {
+    let radius = radius.abs();
+    let mut rng = SmallRng::seed_from_u64(INITIAL_POSITION_SEED);
+
     (0..node_count)
-        .map(|i| {
-            let mut p = vector::zero(dim);
-            p[0] = i as f64 * spacing - offset;
-            p
+        .map(|_| {
+            (0..dim)
+                .map(|_| {
+                    if radius == 0.0 {
+                        0.0
+                    } else {
+                        rng.random_range(-radius..radius)
+                    }
+                })
+                .collect()
         })
         .collect()
 }
@@ -129,7 +146,7 @@ pub fn simulate(graph: &Graph, params: &SimParams) -> Vec<Vec<f64>> {
     let n = graph.node_count;
     let dim = graph.dim;
 
-    let mut pos: Vec<Vec<f64>> = line_start(n, dim, params.edge_length * 0.5);
+    let mut pos = random_start(n, dim, params.edge_length);
     let mut vel: Vec<Vec<f64>> = (0..n).map(|_| vector::zero(dim)).collect();
 
     for _ in 0..params.steps {
@@ -219,9 +236,6 @@ pub fn simulate_projected_2d(graph: &Graph, params: &SimParams) -> Vec<[f64; 2]>
 }
 
 fn projection_axis(axis: usize, dim: usize) -> [f64; 2] {
-    const PRESET_ANGLES_DEGREES: [f64; 6] = [0.0, 90.0, 33.0, 6.0, 80.0, 3.0];
-    const PRESET_SCALES: [f64; 6] = [1.5, 1.5, 1.0, 4.1, 4.1, 10.0];
-
     let (angle, scale) = if axis < PRESET_ANGLES_DEGREES.len() {
         (
             PRESET_ANGLES_DEGREES[axis].to_radians(),
@@ -280,6 +294,32 @@ pub fn hypercube(n: usize) -> Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tuned_defaults_are_stable() {
+        let params = SimParams::default();
+
+        assert_eq!(params.repulsion, 3500.0);
+        assert_eq!(params.damping, 0.70);
+    }
+
+    #[test]
+    fn random_start_is_seeded_and_uses_every_dimension() {
+        let first = random_start(8, 4, 100.0);
+        let second = random_start(8, 4, 100.0);
+
+        assert_eq!(first, second);
+        assert!(
+            first
+                .iter()
+                .flatten()
+                .all(|coordinate| coordinate.abs() < 100.0)
+        );
+        for axis in 0..4 {
+            assert!(first.iter().any(|point| point[axis] != 0.0));
+        }
+        assert_eq!(random_start(2, 3, 0.0), vec![vec![0.0; 3]; 2]);
+    }
 
     #[test]
     fn hypercube_has_right_shape() {

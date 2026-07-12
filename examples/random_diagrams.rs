@@ -2,66 +2,159 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use ofposets::{Embedding, FramedPoset, Renderer, Sign, boundary, random_framed_poset, to_dot};
+use ofposets::{
+    Embedding, FramedPoset, FramedPosetSubset, Renderer, Sign, boundary, embedding_to_dot,
+    random_framed_poset, to_dot,
+};
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
 const CELL_COUNT: usize = 10;
-const SAMPLE_COUNT: usize = 100;
-const SEED: u64 = 0x5eed_0f50_5e75;
+const SEED: u64 = 0xc0b1_ca1e_2026_0712;
+const SIGN_PAIRS: [(Sign, Sign); 4] = [
+    (Sign::Input, Sign::Input),
+    (Sign::Input, Sign::Output),
+    (Sign::Output, Sign::Input),
+    (Sign::Output, Sign::Output),
+];
 
 fn main() -> std::io::Result<()> {
-    let output_dir = Path::new("visualizations/random_10_cells");
-    let cubular_output_dir = Path::new("visualizations/random_10_cells_cubular");
+    let output_dir = Path::new("visualizations/random_10_cells_intersection_subset_search");
+    if output_dir.exists() {
+        fs::remove_dir_all(output_dir)?;
+    }
     fs::create_dir_all(output_dir)?;
-    fs::create_dir_all(cubular_output_dir)?;
 
     let mut rng = SmallRng::seed_from_u64(SEED);
-    let mut cubular_count = 0;
-    for sample in 0..SAMPLE_COUNT {
+    for candidate in 1usize.. {
         let poset = Arc::new(random_framed_poset(CELL_COUNT, &mut rng));
-        let compass_dot = to_dot(&poset, Renderer::CompassSpring);
-        let graded_dot = to_dot(&poset, Renderer::Ranked);
-        let compass_file_name = format!("sample_{sample:03}.dot");
-        let graded_file_name = format!("sample_{sample:03}_graded.dot");
+        if !is_cubular(&poset) {
+            continue;
+        }
 
-        fs::write(output_dir.join(&compass_file_name), &compass_dot)?;
-        fs::write(output_dir.join(&graded_file_name), &graded_dot)?;
-        if is_cubular(&poset) {
-            fs::write(cubular_output_dir.join(compass_file_name), compass_dot)?;
-            fs::write(cubular_output_dir.join(graded_file_name), graded_dot)?;
-            cubular_count += 1;
+        for (sign_0, sign_1) in SIGN_PAIRS {
+            let (iterated, intersection) = boundary_intersection_embeddings(&poset, sign_0, sign_1);
+            if Embedding::equal(&iterated, &intersection) {
+                continue;
+            }
+
+            let intersection_subset = FramedPosetSubset::from_embedding(&intersection);
+            let iterated_subset = FramedPosetSubset::from_embedding(&iterated);
+            if !intersection_subset.is_subset_of(&iterated_subset) {
+                continue;
+            }
+
+            write_match(
+                output_dir,
+                candidate,
+                &poset,
+                sign_0,
+                sign_1,
+                &iterated,
+                &intersection,
+            )?;
+            println!(
+                "found a matching cubular OFP after {candidate} candidates for ({}, {})",
+                sign_name(sign_0),
+                sign_name(sign_1)
+            );
+            return Ok(());
         }
     }
 
-    println!(
-        "wrote {SAMPLE_COUNT} OFPs in compass-spring and graded layouts to {}",
-        output_dir.display()
-    );
-    if cubular_count == 0 {
-        println!("no cubular OFPs found");
-    } else {
-        println!(
-            "wrote {cubular_count} cubular diagrams to {}",
-            cubular_output_dir.display()
-        );
-    }
-    Ok(())
+    unreachable!("the unbounded candidate iterator cannot terminate")
 }
 
 fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
-    for sign_0 in [Sign::Input, Sign::Output] {
-        for sign_1 in [Sign::Input, Sign::Output] {
-            let zero_then_one = iterated_boundary(shape, sign_0, 0, sign_1, 1);
-            let one_then_zero = iterated_boundary(shape, sign_1, 1, sign_0, 0);
+    for (sign_0, sign_1) in SIGN_PAIRS {
+        let zero_then_one = iterated_boundary(shape, sign_0, 0, sign_1, 1);
+        let one_then_zero = iterated_boundary(shape, sign_1, 1, sign_0, 0);
 
-            if !Embedding::equal(&zero_then_one, &one_then_zero) {
-                return false;
-            }
+        if !Embedding::equal(&zero_then_one, &one_then_zero) {
+            return false;
         }
     }
 
     true
+}
+
+fn boundary_intersection_embeddings(
+    shape: &Arc<FramedPoset>,
+    sign_0: Sign,
+    sign_1: Sign,
+) -> (Embedding, Embedding) {
+    let (_, boundary_0) = boundary(sign_0, 0, shape);
+    let (_, boundary_1) = boundary(sign_1, 1, shape);
+    let intersection = Embedding::intersection(&boundary_0, &boundary_1).into_codomain;
+    let iterated = iterated_boundary(shape, sign_1, 1, sign_0, 0);
+
+    (iterated, intersection)
+}
+
+fn write_match(
+    output_dir: &Path,
+    candidate: usize,
+    shape: &Arc<FramedPoset>,
+    sign_0: Sign,
+    sign_1: Sign,
+    iterated: &Embedding,
+    intersection: &Embedding,
+) -> std::io::Result<()> {
+    fs::write(
+        output_dir.join("sample.dot"),
+        to_dot(shape.as_ref(), Renderer::CompassSpring),
+    )?;
+    fs::write(
+        output_dir.join("sample_graded.dot"),
+        to_dot(shape.as_ref(), Renderer::Ranked),
+    )?;
+
+    let serialized = serde_json::to_string_pretty(shape.as_ref()).map_err(std::io::Error::other)?;
+    fs::write(
+        output_dir.join("sample.ofp.json"),
+        format!("{serialized}\n"),
+    )?;
+
+    let sign_0 = sign_file_name(sign_0);
+    let sign_1 = sign_file_name(sign_1);
+    let iterated_name = format!("{sign_0}_0_{sign_1}_1");
+    let intersection_name = format!("{sign_0}_0_intersection_{sign_1}_1");
+
+    write_embedding_layouts(output_dir, &iterated_name, iterated)?;
+    write_embedding_layouts(output_dir, &intersection_name, intersection)?;
+    fs::write(
+        output_dir.join("match.txt"),
+        format!("candidate\t{candidate}\nsign_0\t{sign_0}\nsign_1\t{sign_1}\n"),
+    )
+}
+
+fn write_embedding_layouts(
+    output_dir: &Path,
+    name: &str,
+    embedding: &Embedding,
+) -> std::io::Result<()> {
+    fs::write(
+        output_dir.join(format!("{name}.dot")),
+        embedding_to_dot(embedding, Renderer::CompassSpring),
+    )?;
+    fs::write(
+        output_dir.join(format!("{name}_graded.dot")),
+        embedding_to_dot(embedding, Renderer::Ranked),
+    )
+}
+
+fn sign_name(sign: Sign) -> &'static str {
+    match sign {
+        Sign::Input => "input",
+        Sign::Output => "output",
+    }
+}
+
+fn sign_file_name(sign: Sign) -> &'static str {
+    match sign {
+        Sign::Input => "minus",
+        Sign::Output => "plus",
+    }
 }
 
 fn iterated_boundary(
@@ -81,7 +174,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn square_is_cubular() {
+    fn square_has_equal_iterated_boundaries_and_intersections() {
         let square = Arc::new(FramedPoset::from_faces(
             vec![
                 vec![vec![], vec![], vec![], vec![]],
@@ -101,5 +194,15 @@ mod tests {
         ));
 
         assert!(is_cubular(&square));
+        for (sign_0, sign_1) in SIGN_PAIRS {
+            let (iterated, intersection) =
+                boundary_intersection_embeddings(&square, sign_0, sign_1);
+            assert!(Embedding::equal(&iterated, &intersection));
+
+            let iterated_subset = FramedPosetSubset::from_embedding(&iterated);
+            let intersection_subset = FramedPosetSubset::from_embedding(&intersection);
+            assert!(intersection_subset.is_subset_of(&iterated_subset));
+            assert!(iterated_subset.is_subset_of(&intersection_subset));
+        }
     }
 }

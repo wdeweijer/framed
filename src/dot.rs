@@ -3,6 +3,8 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 
+use serde::Serialize;
+
 use crate::compass_spring_nd::{
     AxisPort, Edge as SpringEdge, Graph as SpringGraph, SimParams, simulate_projected_2d,
 };
@@ -45,6 +47,90 @@ pub fn to_dot_with_params(shape: &FramedPoset, renderer: Renderer, params: &SimP
     writeln!(&mut out, "}}").unwrap();
 
     out
+}
+
+/// Export an OFP as JSON for the browser-based compass-spring debugger.
+pub fn compass_spring_debug_json(shape: &FramedPoset) -> String {
+    let graph = compass_spring_graph(shape);
+    let mut nodes = Vec::with_capacity(graph.node_count);
+
+    for dim in 0..shape.sizes().len() {
+        for pos in 0..shape.sizes()[dim] {
+            nodes.push(SpringDebugNode {
+                id: nodes.len(),
+                cell_dimension: dim,
+                cell_position: pos,
+                basis: shape.basis_of(dim, pos).clone(),
+                label: node_label(shape, dim, pos),
+            });
+        }
+    }
+
+    let edges = graph
+        .edges
+        .iter()
+        .map(|edge| SpringDebugEdge {
+            tail: edge.tail,
+            head: edge.head,
+            sign: if edge.tail_port.is_some_and(|port| port.positive) {
+                "input"
+            } else {
+                "output"
+            },
+            tail_port: edge.tail_port.map(SpringDebugPort::from),
+            head_port: edge.head_port.map(SpringDebugPort::from),
+        })
+        .collect();
+
+    let output = SpringDebugOutput {
+        version: 1,
+        dimension: graph.dim,
+        nodes,
+        edges,
+    };
+
+    serde_json::to_string_pretty(&output).expect("spring debug data must serialize")
+}
+
+#[derive(Serialize)]
+struct SpringDebugOutput {
+    version: usize,
+    dimension: usize,
+    nodes: Vec<SpringDebugNode>,
+    edges: Vec<SpringDebugEdge>,
+}
+
+#[derive(Serialize)]
+struct SpringDebugNode {
+    id: usize,
+    cell_dimension: usize,
+    cell_position: usize,
+    basis: Vec<usize>,
+    label: String,
+}
+
+#[derive(Serialize)]
+struct SpringDebugEdge {
+    tail: usize,
+    head: usize,
+    sign: &'static str,
+    tail_port: Option<SpringDebugPort>,
+    head_port: Option<SpringDebugPort>,
+}
+
+#[derive(Serialize)]
+struct SpringDebugPort {
+    axis: usize,
+    positive: bool,
+}
+
+impl From<AxisPort> for SpringDebugPort {
+    fn from(port: AxisPort) -> Self {
+        Self {
+            axis: port.axis,
+            positive: port.positive,
+        }
+    }
 }
 
 fn poset_graph_name(renderer: Renderer) -> &'static str {
@@ -375,7 +461,7 @@ fn compass_spring_graph(shape: &FramedPoset) -> SpringGraph {
     }
 
     SpringGraph {
-        dim: max_axis.map_or(1, |axis| axis + 1),
+        dim: max_axis.map_or(2, |axis| (axis + 1).max(2)),
         node_count,
         edges,
     }
@@ -532,6 +618,52 @@ mod tests {
         assert!(dot.contains("layout=neato"));
         assert!(dot.contains("pos=\""));
         assert!(!dot.contains("rank=same"));
+    }
+
+    #[test]
+    fn spring_debug_json_contains_the_rust_layout_inputs() {
+        let square = square();
+        let output: serde_json::Value =
+            serde_json::from_str(&compass_spring_debug_json(&square)).unwrap();
+
+        assert_eq!(output["version"], 1);
+        assert_eq!(output["dimension"], 2);
+        assert_eq!(output["nodes"].as_array().unwrap().len(), 9);
+        assert_eq!(output["edges"].as_array().unwrap().len(), 12);
+        assert!(output.get("parameters").is_none());
+        assert!(output.get("projection").is_none());
+        assert_eq!(output["nodes"][8]["basis"], serde_json::json!([0, 1]));
+        assert!(output["edges"].as_array().unwrap().iter().any(|edge| {
+            edge["sign"] == "input"
+                && edge["tail_port"]["positive"] == true
+                && edge["head_port"]["positive"] == false
+        }));
+    }
+
+    #[test]
+    fn spring_debug_dimension_is_at_least_two_and_uses_the_highest_direction() {
+        let point: serde_json::Value =
+            serde_json::from_str(&compass_spring_debug_json(&FramedPoset::point())).unwrap();
+        assert_eq!(point["dimension"], 2);
+
+        let direction_zero_arrow = FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![1]]],
+        );
+        let direction_zero: serde_json::Value =
+            serde_json::from_str(&compass_spring_debug_json(&direction_zero_arrow)).unwrap();
+        assert_eq!(direction_zero["dimension"], 2);
+
+        let direction_five_arrow = FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![5]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![1]]],
+        );
+        let output: serde_json::Value =
+            serde_json::from_str(&compass_spring_debug_json(&direction_five_arrow)).unwrap();
+
+        assert_eq!(output["dimension"], 6);
     }
 
     #[test]

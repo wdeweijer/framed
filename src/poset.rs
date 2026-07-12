@@ -2,8 +2,13 @@
 
 use std::sync::Arc;
 
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::embedding::{Embedding, NO_PREIMAGE};
 use crate::intset::{self, IntSet};
+
+const SERIALIZATION_VERSION: usize = 1;
 
 /// Input/output polarity for oriented cover relations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -33,6 +38,110 @@ pub struct FramedPoset {
     pub(crate) faces_out: Vec<Vec<IntSet>>,
     pub(crate) cofaces_in: Vec<Vec<IntSet>>,
     pub(crate) cofaces_out: Vec<Vec<IntSet>>,
+}
+
+#[derive(Serialize)]
+struct FramedPosetRef<'a> {
+    version: usize,
+    basis: &'a [Vec<IntSet>],
+    faces_in: &'a [Vec<IntSet>],
+    faces_out: &'a [Vec<IntSet>],
+}
+
+#[derive(Deserialize)]
+struct FramedPosetData {
+    version: usize,
+    basis: Vec<Vec<IntSet>>,
+    faces_in: Vec<Vec<IntSet>>,
+    faces_out: Vec<Vec<IntSet>>,
+}
+
+impl Serialize for FramedPoset {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        FramedPosetRef {
+            version: SERIALIZATION_VERSION,
+            basis: &self.basis,
+            faces_in: &self.faces_in,
+            faces_out: &self.faces_out,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FramedPoset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let data = FramedPosetData::deserialize(deserializer)?;
+        if data.version != SERIALIZATION_VERSION {
+            return Err(D::Error::custom(format!(
+                "unsupported framed-poset serialization version {}",
+                data.version
+            )));
+        }
+
+        let levels = data.basis.len();
+        if data.faces_in.len() != levels || data.faces_out.len() != levels {
+            return Err(D::Error::custom(
+                "basis and signed face tables must have the same number of levels",
+            ));
+        }
+
+        let sizes: Vec<usize> = data.basis.iter().map(Vec::len).collect();
+        for dim in 0..levels {
+            if data.faces_in[dim].len() != sizes[dim] || data.faces_out[dim].len() != sizes[dim] {
+                return Err(D::Error::custom(format!(
+                    "signed face rows at level {dim} must match the number of cells"
+                )));
+            }
+
+            if dim > 0
+                && data.faces_in[dim]
+                    .iter()
+                    .chain(&data.faces_out[dim])
+                    .flatten()
+                    .any(|&face| face >= sizes[dim - 1])
+            {
+                return Err(D::Error::custom(format!(
+                    "face index at level {dim} is out of bounds"
+                )));
+            }
+        }
+
+        let mut cofaces_in: Vec<Vec<IntSet>> = sizes.iter().map(|&n| vec![vec![]; n]).collect();
+        let mut cofaces_out: Vec<Vec<IntSet>> = sizes.iter().map(|&n| vec![vec![]; n]).collect();
+
+        for dim in 1..levels {
+            for pos in 0..sizes[dim] {
+                for &face in &data.faces_in[dim][pos] {
+                    intset::insert(&mut cofaces_in[dim - 1][face], pos);
+                }
+                for &face in &data.faces_out[dim][pos] {
+                    intset::insert(&mut cofaces_out[dim - 1][face], pos);
+                }
+            }
+        }
+
+        let poset = Self {
+            dim: levels as isize - 1,
+            basis: data.basis,
+            faces_in: data.faces_in,
+            faces_out: data.faces_out,
+            cofaces_in,
+            cofaces_out,
+        };
+        if !poset.well_formed() {
+            return Err(D::Error::custom(
+                "serialized framed poset is not well-formed",
+            ));
+        }
+
+        Ok(poset)
+    }
 }
 
 /// A subset of cells of a framed poset.
@@ -70,6 +179,21 @@ impl FramedPosetSubset {
             .and_then(|row| row.get(pos))
             .copied()
             .unwrap_or(false)
+    }
+
+    /// True when every cell in this subset also belongs to `other`.
+    ///
+    /// The ambient framed posets are compared structurally rather than by
+    /// pointer identity.
+    pub fn is_subset_of(&self, other: &Self) -> bool {
+        self.well_formed()
+            && other.well_formed()
+            && FramedPoset::equal(&self.shape, &other.shape)
+            && self
+                .keep
+                .iter()
+                .zip(&other.keep)
+                .all(|(left, right)| left.iter().zip(right).all(|(&x, &y)| !x || y))
     }
 
     fn well_formed(&self) -> bool {
@@ -545,6 +669,54 @@ mod tests {
     }
 
     #[test]
+    fn serialization_round_trips_defining_data_and_regenerates_cofaces() {
+        let original = square();
+
+        let json = serde_json::to_string_pretty(original.as_ref()).unwrap();
+        let restored: FramedPoset = serde_json::from_str(&json).unwrap();
+
+        assert!(FramedPoset::equal(&original, &restored));
+        assert_eq!(
+            original.cofaces_of(Sign::Input, 1, 0),
+            restored.cofaces_of(Sign::Input, 1, 0)
+        );
+        assert!(json.contains("\"version\": 1"));
+        assert!(!json.contains("cofaces"));
+    }
+
+    #[test]
+    fn serialization_round_trips_empty_poset() {
+        let json = serde_json::to_string(&FramedPoset::empty()).unwrap();
+        let restored: FramedPoset = serde_json::from_str(&json).unwrap();
+
+        assert!(FramedPoset::equal(&FramedPoset::empty(), &restored));
+    }
+
+    #[test]
+    fn deserialization_rejects_invalid_face_index() {
+        let json = serde_json::json!({
+            "version": 1,
+            "basis": [[[]], [[0]]],
+            "faces_in": [[[]], [[1]]],
+            "faces_out": [[[]], [[]]],
+        });
+
+        assert!(serde_json::from_value::<FramedPoset>(json).is_err());
+    }
+
+    #[test]
+    fn deserialization_rejects_poset_that_is_not_well_formed() {
+        let json = serde_json::json!({
+            "version": 1,
+            "basis": [[[]], [[0]]],
+            "faces_in": [[[]], [[0]]],
+            "faces_out": [[[]], [[0]]],
+        });
+
+        assert!(serde_json::from_value::<FramedPoset>(json).is_err());
+    }
+
+    #[test]
     fn subset_from_embedding_marks_image_cells() {
         let arrow = tight_arrow();
         let (_, input_embedding) = boundary(Sign::Input, 0, &arrow);
@@ -552,6 +724,20 @@ mod tests {
 
         assert!(subset.contains(0, 0));
         assert!(!subset.contains(0, 1));
+    }
+
+    #[test]
+    fn subset_predicate_compares_cells_in_a_common_ambient_poset() {
+        let arrow = tight_arrow();
+        let endpoint =
+            FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![true, false], vec![false]]);
+        let whole = FramedPosetSubset::make(Arc::clone(&arrow), vec![vec![true, true], vec![true]]);
+        let point = FramedPosetSubset::make(Arc::new(FramedPoset::point()), vec![vec![true]]);
+
+        assert!(endpoint.is_subset_of(&endpoint));
+        assert!(endpoint.is_subset_of(&whole));
+        assert!(!whole.is_subset_of(&endpoint));
+        assert!(!endpoint.is_subset_of(&point));
     }
 
     #[test]

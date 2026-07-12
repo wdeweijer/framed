@@ -8,9 +8,19 @@ use crate::poset::FramedPoset;
 /// Generate an oriented framed poset with exactly `cell_count` cells.
 ///
 /// Cell bases are restricted to `∅`, `{0}`, `{1}`, and `{0, 1}`. Every
-/// oriented framed poset with those bases and the requested number of cells
+/// result has at least one `{0, 1}` cell. Every oriented framed poset with
+/// those bases, at least one `{0, 1}` cell, and the requested number of cells
 /// has positive probability, up to the ordering of cells within each level.
+///
+/// # Panics
+///
+/// Panics if `cell_count` is less than four, the minimum number of cells needed
+/// for a well-formed poset containing a `{0, 1}` cell.
 pub fn random_framed_poset<R: Rng + ?Sized>(cell_count: usize, rng: &mut R) -> FramedPoset {
+    assert!(
+        cell_count >= 4,
+        "at least four cells are required to generate a poset with a {{0, 1}} cell"
+    );
     let profiles = feasible_profiles(cell_count);
     let profile = profiles[rng.random_range(0..profiles.len())];
     generate_with_profile(profile, rng)
@@ -42,7 +52,7 @@ fn feasible_profiles(cell_count: usize) -> Vec<CellProfile> {
                 let edges_have_faces = edges_0 + edges_1 == 0 || vertices > 0;
                 let faces_have_basis_faces = faces == 0 || (edges_0 > 0 && edges_1 > 0);
 
-                if edges_have_faces && faces_have_basis_faces {
+                if faces > 0 && edges_have_faces && faces_have_basis_faces {
                     profiles.push(CellProfile {
                         vertices,
                         edges_0,
@@ -113,8 +123,7 @@ fn generate_with_profile<R: Rng + ?Sized>(profile: CellProfile, rng: &mut R) -> 
 }
 
 fn profile_is_feasible(profile: CellProfile) -> bool {
-    (profile.edges_0 + profile.edges_1 == 0 || profile.vertices > 0)
-        && (profile.faces == 0 || (profile.edges_0 > 0 && profile.edges_1 > 0))
+    profile.faces > 0 && profile.vertices > 0 && profile.edges_0 > 0 && profile.edges_1 > 0
 }
 
 fn random_nonempty_signed_subset<R: Rng + ?Sized>(
@@ -154,21 +163,31 @@ mod tests {
     fn generates_the_requested_number_of_cells() {
         let mut rng = SmallRng::seed_from_u64(0x0f_50_5e_75);
 
-        for cell_count in 0..=20 {
+        for cell_count in 4..=20 {
             for _ in 0..64 {
                 let poset = random_framed_poset(cell_count, &mut rng);
                 assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
+                assert!(poset.sizes().get(2).is_some_and(|&size| size > 0));
+                assert_eq!(poset.basis_of(2, 0), &vec![0, 1]);
                 assert!(poset.well_formed());
             }
         }
     }
 
     #[test]
+    #[should_panic(expected = "at least four cells are required")]
+    fn rejects_cell_count_too_small_for_a_two_directional_cell() {
+        let mut rng = SmallRng::seed_from_u64(0);
+        random_framed_poset(3, &mut rng);
+    }
+
+    #[test]
     fn every_feasible_profile_generates_a_well_formed_poset() {
         let mut rng = SmallRng::seed_from_u64(0x0ba5_15c1_05ed);
 
-        for cell_count in 0..=20 {
+        for cell_count in 4..=20 {
             for profile in feasible_profiles(cell_count) {
+                assert!(profile.faces > 0);
                 let poset = generate_with_profile(profile, &mut rng);
                 assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
                 assert!(poset.well_formed());
@@ -181,7 +200,7 @@ mod tests {
         let mut first_rng = SmallRng::seed_from_u64(42);
         let mut second_rng = SmallRng::seed_from_u64(42);
 
-        for cell_count in 0..=20 {
+        for cell_count in 4..=20 {
             let first = random_framed_poset(cell_count, &mut first_rng);
             let second = random_framed_poset(cell_count, &mut second_rng);
             assert!(FramedPoset::equal(&first, &second));

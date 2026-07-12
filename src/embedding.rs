@@ -82,6 +82,11 @@ impl Embedding {
         }
     }
 
+    /// True when the domain has no cells.
+    pub fn is_empty(&self) -> bool {
+        self.dom.sizes().into_iter().all(|size| size == 0)
+    }
+
     /// Compose `f: A -> B` with `g: B -> C`, returning `g f: A -> C`.
     ///
     /// The middle framed posets are compared structurally, not by pointer
@@ -488,6 +493,16 @@ mod tests {
 
         assert!(!FramedPoset::equal(&id.dom, &reversed_embedding.dom));
         assert!(Embedding::equal(&id, &reversed_embedding));
+    }
+
+    #[test]
+    fn is_empty_checks_the_domain() {
+        let cod = arrow();
+
+        assert!(Embedding::empty(Arc::clone(&cod)).is_empty());
+        assert!(Embedding::id(Arc::new(FramedPoset::empty())).is_empty());
+        assert!(!endpoint_embedding(0, Arc::clone(&cod)).is_empty());
+        assert!(!Embedding::id(cod).is_empty());
     }
 
     #[test]

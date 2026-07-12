@@ -50,14 +50,37 @@ fn main() -> std::io::Result<()> {
     )?;
 
     let (minus_1_boundary, minus_1_embedding) = boundary(Sign::Input, 1, &three_cube);
+    let minus_0_union_minus_1 = Embedding::union(&minus_0_embedding, &minus_1_embedding);
+    let minus_0_intersection_minus_1 =
+        Embedding::intersection(&minus_0_embedding, &minus_1_embedding);
+    fs::write(
+        output_dir.join("n_cube_3_boundary_minus_0_into_minus_0_union_minus_1_compass_spring.dot"),
+        embedding_to_dot(
+            &minus_0_union_minus_1.left_into_union,
+            Renderer::CompassSpring,
+        ),
+    )?;
+
     let (minus_1_minus_0_domain, minus_1_minus_0_embedding) =
         boundary(Sign::Input, 0, &minus_1_boundary);
     let minus_1_minus_0_composite =
         Embedding::compose(&minus_1_minus_0_embedding, &minus_1_embedding);
+    let intersection_into_union_via_minus_0 = Embedding::compose(
+        &minus_0_intersection_minus_1.into_left,
+        &minus_0_union_minus_1.left_into_union,
+    );
+    let intersection_into_union_via_minus_1 = Embedding::compose(
+        &minus_0_intersection_minus_1.into_right,
+        &minus_0_union_minus_1.right_into_union,
+    );
 
     assert!(Embedding::equal(
         &minus_0_minus_1_composite,
         &minus_1_minus_0_composite
+    ));
+    assert!(Embedding::equal(
+        &intersection_into_union_via_minus_0,
+        &intersection_into_union_via_minus_1
     ));
     assert!(FramedPoset::equal(
         &minus_0_minus_1_domain,
@@ -65,8 +88,54 @@ fn main() -> std::io::Result<()> {
     ));
 
     fs::write(
+        output_dir
+            .join("n_cube_3_boundary_minus_0_intersection_minus_1_into_union_compass_spring.dot"),
+        embedding_to_dot(
+            &intersection_into_union_via_minus_0,
+            Renderer::CompassSpring,
+        ),
+    )?;
+
+    fs::write(
         output_dir.join("n_cube_3_boundary_minus_1_minus_0_composite_compass_spring.dot"),
         embedding_to_dot(&minus_1_minus_0_composite, Renderer::CompassSpring),
+    )?;
+
+    let four_cube = Arc::new(n_cube(4));
+    let (_, four_minus_0_embedding) = boundary(Sign::Input, 0, &four_cube);
+    let (_, four_minus_1_embedding) = boundary(Sign::Input, 1, &four_cube);
+    let four_minus_0_union_minus_1 =
+        Embedding::union(&four_minus_0_embedding, &four_minus_1_embedding);
+    let four_minus_0_intersection_minus_1 =
+        Embedding::intersection(&four_minus_0_embedding, &four_minus_1_embedding);
+    fs::write(
+        output_dir.join("n_cube_4_boundary_minus_0_into_minus_0_union_minus_1_compass_spring.dot"),
+        embedding_to_dot(
+            &four_minus_0_union_minus_1.left_into_union,
+            Renderer::CompassSpring,
+        ),
+    )?;
+
+    let four_intersection_into_union_via_minus_0 = Embedding::compose(
+        &four_minus_0_intersection_minus_1.into_left,
+        &four_minus_0_union_minus_1.left_into_union,
+    );
+    let four_intersection_into_union_via_minus_1 = Embedding::compose(
+        &four_minus_0_intersection_minus_1.into_right,
+        &four_minus_0_union_minus_1.right_into_union,
+    );
+    assert!(Embedding::equal(
+        &four_intersection_into_union_via_minus_0,
+        &four_intersection_into_union_via_minus_1
+    ));
+
+    fs::write(
+        output_dir
+            .join("n_cube_4_boundary_minus_0_intersection_minus_1_into_union_compass_spring.dot"),
+        embedding_to_dot(
+            &four_intersection_into_union_via_minus_0,
+            Renderer::CompassSpring,
+        ),
     )?;
 
     Ok(())

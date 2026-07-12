@@ -254,6 +254,7 @@ mod tests {
         assert_eq!(po.tip.faces_of(Sign::Output, 1, 1), &vec![2]);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn pushout_detects_glued_basis_mismatch_in_debug() {
