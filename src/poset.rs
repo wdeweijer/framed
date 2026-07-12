@@ -204,7 +204,7 @@ impl FramedPoset {
         intset::union(&self.faces_in[dim][pos], &self.faces_out[dim][pos])
     }
 
-    fn well_formed(&self) -> bool {
+    pub(crate) fn well_formed(&self) -> bool {
         let levels = self.basis.len();
 
         if self.dim != levels as isize - 1 {

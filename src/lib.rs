@@ -11,9 +11,11 @@ pub mod embedding;
 pub mod intset;
 pub mod poset;
 pub mod pushout;
+pub mod random;
 
 pub use dot::{
     Renderer, embedding_to_dot, embedding_to_dot_with_params, to_dot, to_dot_with_params,
 };
 pub use embedding::{Embedding, EmbeddingIntersection, EmbeddingUnion, NO_PREIMAGE};
 pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
+pub use random::random_framed_poset;
