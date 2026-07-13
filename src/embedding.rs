@@ -87,6 +87,19 @@ impl Embedding {
         self.dom.sizes().into_iter().all(|size| size == 0)
     }
 
+    /// True when every codomain cell has a preimage.
+    pub fn is_surjective(&self) -> bool {
+        self.inv
+            .iter()
+            .flatten()
+            .all(|&preimage| preimage != NO_PREIMAGE)
+    }
+
+    /// True when this embedding is an isomorphism of framed posets.
+    pub fn is_isomorphism(&self) -> bool {
+        self.is_surjective() && self.is_closed()
+    }
+
     /// Compose `f: A -> B` with `g: B -> C`, returning `g f: A -> C`.
     ///
     /// The middle framed posets are compared structurally, not by pointer
@@ -503,6 +516,35 @@ mod tests {
         assert!(Embedding::id(Arc::new(FramedPoset::empty())).is_empty());
         assert!(!endpoint_embedding(0, Arc::clone(&cod)).is_empty());
         assert!(!Embedding::id(cod).is_empty());
+    }
+
+    #[test]
+    fn is_surjective_checks_every_inverse_entry() {
+        let cod = arrow();
+
+        assert!(Embedding::id(Arc::clone(&cod)).is_surjective());
+        assert!(!endpoint_embedding(0, cod).is_surjective());
+    }
+
+    #[test]
+    fn is_isomorphism_requires_closedness_and_surjectivity() {
+        let cod = arrow();
+        let identity = Embedding::id(Arc::clone(&cod));
+        let proper_closed_subobject = endpoint_embedding(0, Arc::clone(&cod));
+        let bijective_with_missing_incidence = Embedding::make(
+            input_half_arrow(),
+            cod,
+            vec![vec![0, 1], vec![0]],
+            vec![vec![0, 1], vec![0]],
+        );
+
+        assert!(identity.is_isomorphism());
+        assert!(proper_closed_subobject.is_closed());
+        assert!(!proper_closed_subobject.is_surjective());
+        assert!(!proper_closed_subobject.is_isomorphism());
+        assert!(bijective_with_missing_incidence.is_surjective());
+        assert!(!bijective_with_missing_incidence.is_closed());
+        assert!(!bijective_with_missing_incidence.is_isomorphism());
     }
 
     #[test]
