@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compass spring debugger</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    font-family: sans-serif;
+    background: #f4f4f2;
+    color: #18181b;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #f4f4f2;
+    color: #18181b;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 58px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #d4d4d8;
+    background: #ffffff;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  .file-name {
+    min-width: 0;
+    overflow: hidden;
+    color: #52525b;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  button,
+  .file-button {
+    min-height: 34px;
+    padding: 7px 11px;
+    border: 1px solid #a1a1aa;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #18181b;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  button:hover,
+  .file-button:hover { background: #f4f4f5; }
+  button:disabled { cursor: default; opacity: 0.45; }
+  .file-button input { display: none; }
+
+  .frame-counter {
+    min-width: 126px;
+    color: #3f3f46;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .view-range {
+    min-width: 250px;
+    color: #3f3f46;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .parameters {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(150px, 1fr));
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #d4d4d8;
+    background: #fafafa;
+  }
+
+  .parameter {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 8px;
+    min-width: 0;
+  }
+
+  .parameter label,
+  .parameter output {
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .parameter label { color: #52525b; }
+  .parameter output {
+    min-width: 46px;
+    color: #18181b;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .parameter input {
+    grid-column: 1 / -1;
+    width: 100%;
+    accent-color: #2563eb;
+  }
+
+  main {
+    position: relative;
+    height: calc(100vh - 137px);
+    min-height: 420px;
+    overflow: hidden;
+    background: #ffffff;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .empty-state {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #71717a;
+    font-size: 14px;
+    pointer-events: none;
+  }
+
+  @media (max-width: 1050px) {
+    header { flex-wrap: wrap; }
+    .file-name { order: 3; width: 100%; }
+    .parameters { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+    main { height: calc(100vh - 209px); }
+  }
+
+  @media (max-width: 620px) {
+    .actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
+    .frame-counter { margin-left: auto; }
+    .parameters { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+    main { height: 620px; }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root, body { background: #18181b; color: #f4f4f5; }
+    header { border-color: #3f3f46; background: #27272a; }
+    .file-name, .parameter label, .frame-counter, .view-range { color: #a1a1aa; }
+    button, .file-button {
+      border-color: #52525b;
+      background: #27272a;
+      color: #f4f4f5;
+    }
+    button:hover, .file-button:hover { background: #3f3f46; }
+    .parameters { border-color: #3f3f46; background: #202023; }
+    .parameter output { color: #f4f4f5; }
+    main { background: #18181b; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Compass spring debugger</h1>
+  <div id="file-name" class="file-name">No OFP loaded</div>
+  <div class="actions">
+    <label class="file-button">Load JSON<input id="data-file" type="file" accept="application/json,.json"></label>
+    <button id="play-pause" disabled>Pause</button>
+    <button id="step" disabled>Step</button>
+    <button id="restart" disabled>Restart</button>
+    <span id="frame-counter" class="frame-counter">Frame 0 / 0</span>
+    <span id="view-range" class="view-range">View x [—, —] · y [—, —]</span>
+  </div>
+</header>
+
+<section class="parameters" aria-label="Simulation parameters">
+  <div class="parameter">
+    <label for="edge-length">Edge length</label>
+    <output id="edge-length-out">100</output>
+    <input id="edge-length" type="range" min="10" max="250" step="1" value="100" disabled>
+  </div>
+  <div class="parameter">
+    <label for="spring-k">Spring k</label>
+    <output id="spring-k-out">0.060</output>
+    <input id="spring-k" type="range" min="0.001" max="0.200" step="0.001" value="0.060" disabled>
+  </div>
+  <div class="parameter">
+    <label for="repulsion">Repulsion</label>
+    <output id="repulsion-out">3500</output>
+    <input id="repulsion" type="range" min="0" max="20000" step="100" value="3500" disabled>
+  </div>
+  <div class="parameter">
+    <label for="damping">Damping</label>
+    <output id="damping-out">0.70</output>
+    <input id="damping" type="range" min="0.20" max="0.99" step="0.01" value="0.70" disabled>
+  </div>
+  <div class="parameter">
+    <label for="center-k">Center k</label>
+    <output id="center-k-out">0.0040</output>
+    <input id="center-k" type="range" min="0" max="0.020" step="0.0005" value="0.004" disabled>
+  </div>
+  <div class="parameter">
+    <label for="steps">Steps</label>
+    <output id="steps-out">1000</output>
+    <input id="steps" type="range" min="1" max="5000" step="1" value="1000" disabled>
+  </div>
+</section>
+
+<main>
+  <canvas id="cv"></canvas>
+  <div id="empty-state" class="empty-state">No OFP loaded</div>
+</main>
+
+<script>
+(() => {
+  // Experiment log:
+  // 2026-07-12: initialize every axis randomly. Rust now uses the same range
+  // with a fixed seed; browser restarts intentionally continue to use fresh randomness.
+  // 2026-07-12: lower repulsion from 6000 to 3500 and damping from 0.82 to
+  // 0.70. These values are now also the Rust defaults.
+  const canvas = document.getElementById('cv');
+  const ctx = canvas.getContext('2d');
+  const fileInput = document.getElementById('data-file');
+  const fileName = document.getElementById('file-name');
+  const emptyState = document.getElementById('empty-state');
+  const playPauseButton = document.getElementById('play-pause');
+  const stepButton = document.getElementById('step');
+  const restartButton = document.getElementById('restart');
+  const frameCounter = document.getElementById('frame-counter');
+  const viewRange = document.getElementById('view-range');
+
+  const parameterControls = [
+    { id: 'edge-length', key: 'edge_length', digits: 0 },
+    { id: 'spring-k', key: 'spring_k', digits: 3 },
+    { id: 'repulsion', key: 'repulsion', digits: 0 },
+    { id: 'damping', key: 'damping', digits: 2 },
+    { id: 'center-k', key: 'center_k', digits: 4 },
+    { id: 'steps', key: 'steps', digits: 0 },
+  ].map(definition => ({
+    ...definition,
+    input: document.getElementById(definition.id),
+    output: document.getElementById(`${definition.id}-out`),
+  }));
+
+  const DEFAULT_PARAMETERS = {
+    edge_length: 100,
+    spring_k: 0.06,
+    repulsion: 3500,
+    damping: 0.70,
+    center_k: 0.004,
+    steps: 1000,
+  };
+  const PRESET_ANGLES_DEGREES = [0, 90, 33, 6, 80, 3];
+  const PRESET_SCALES = [1.5, 1.5, 1.0, 4.1, 4.1, 10.0];
+  const LARGER_DIMENSION_SCALE_INCREMENT = 1.0;
+
+  const V = {
+    zero: dimension => new Array(dimension).fill(0),
+    add: (a, b) => a.map((value, index) => value + b[index]),
+    sub: (a, b) => a.map((value, index) => value - b[index]),
+    scale: (a, scalar) => a.map(value => value * scalar),
+    dot: (a, b) => a.reduce((sum, value, index) => sum + value * b[index], 0),
+    lengthSq(a) { return V.dot(a, a); },
+    length(a) { return Math.sqrt(V.lengthSq(a)); },
+    addInPlace(a, b) { for (let i = 0; i < a.length; i += 1) a[i] += b[i]; },
+    subInPlace(a, b) { for (let i = 0; i < a.length; i += 1) a[i] -= b[i]; },
+  };
+
+  let graph = null;
+  let nodes = [];
+  let initialPositions = [];
+  let dimension = 1;
+  let parameters = { ...DEFAULT_PARAMETERS };
+  let frame = 0;
+  let running = false;
+
+  function resize() {
+    const bounds = canvas.parentElement.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(bounds.width * ratio));
+    canvas.height = Math.max(1, Math.round(bounds.height * ratio));
+  }
+
+  function dimensionFromBases(graphNodes) {
+    let highestDirection = -1;
+    for (const node of graphNodes) {
+      for (const direction of node.basis) highestDirection = Math.max(highestDirection, direction);
+    }
+    return Math.max(2, highestDirection + 1);
+  }
+
+  function validateAndLoad(data, sourceName) {
+    if (data.version !== 1 || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+      throw new Error('unsupported spring debug data');
+    }
+
+    const orderedNodes = [...data.nodes].sort((a, b) => a.id - b.id);
+    orderedNodes.forEach((node, index) => {
+      if (node.id !== index || !Array.isArray(node.basis)) throw new Error('invalid node table');
+    });
+    data.edges.forEach(edge => {
+      if (edge.tail < 0 || edge.tail >= orderedNodes.length || edge.head < 0 || edge.head >= orderedNodes.length) {
+        throw new Error('edge endpoint is outside the node table');
+      }
+    });
+
+    graph = { nodes: orderedNodes, edges: data.edges };
+    dimension = dimensionFromBases(orderedNodes);
+    parameters = { ...DEFAULT_PARAMETERS };
+    fileName.textContent = `${sourceName} · ${dimension}D · ${orderedNodes.length} cells`;
+    emptyState.hidden = true;
+
+    for (const control of parameterControls) {
+      control.input.disabled = false;
+      control.input.value = parameters[control.key];
+      updateParameterOutput(control);
+    }
+    playPauseButton.disabled = false;
+    stepButton.disabled = false;
+    restartButton.disabled = false;
+    restart(true, true);
+  }
+
+  function updateParameterOutput(control) {
+    control.output.value = Number(control.input.value).toFixed(control.digits);
+  }
+
+  function restart(newRandomStart = false, resume = running) {
+    if (!graph) return;
+
+    if (newRandomStart || initialPositions.length !== graph.nodes.length) {
+      initialPositions = graph.nodes.map(() => Array.from(
+        { length: dimension },
+        () => (Math.random() - 0.5) * parameters.edge_length * 2,
+      ));
+    }
+
+    nodes = graph.nodes.map((node, index) => {
+      return {
+        definition: node,
+        pos: [...initialPositions[index]],
+        vel: V.zero(dimension),
+      };
+    });
+    frame = 0;
+    running = resume;
+    playPauseButton.textContent = running ? 'Pause' : 'Play';
+    updateFrameCounter();
+    draw();
+  }
+
+  function unitVector(port) {
+    const vector = V.zero(dimension);
+    vector[port.axis] = port.positive ? 1 : -1;
+    return vector;
+  }
+
+  function simulationStep() {
+    const force = nodes.map(() => V.zero(dimension));
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const delta = V.sub(nodes[j].pos, nodes[i].pos);
+        const distanceSquared = V.lengthSq(delta) + 0.01;
+        const distance = Math.sqrt(distanceSquared);
+        const repulsion = V.scale(delta, parameters.repulsion / (distanceSquared * distance));
+        V.subInPlace(force[i], repulsion);
+        V.addInPlace(force[j], repulsion);
+      }
+    }
+
+    for (const edge of graph.edges) {
+      const tail = edge.tail;
+      const head = edge.head;
+
+      if (edge.tail_port) {
+        const target = V.scale(unitVector(edge.tail_port), parameters.edge_length);
+        const actual = V.sub(nodes[head].pos, nodes[tail].pos);
+        const error = V.sub(actual, target);
+        const spring = V.scale(error, parameters.spring_k);
+        V.subInPlace(force[head], spring);
+        V.addInPlace(force[tail], spring);
+      }
+
+      if (edge.head_port) {
+        const target = V.scale(unitVector(edge.head_port), parameters.edge_length);
+        const actual = V.sub(nodes[tail].pos, nodes[head].pos);
+        const error = V.sub(actual, target);
+        const spring = V.scale(error, parameters.spring_k);
+        V.subInPlace(force[tail], spring);
+        V.addInPlace(force[head], spring);
+      }
+
+      if (!edge.tail_port && !edge.head_port) {
+        const delta = V.sub(nodes[head].pos, nodes[tail].pos);
+        const distance = Math.max(V.length(delta), 1e-6);
+        const stretch = distance - parameters.edge_length;
+        const spring = V.scale(delta, parameters.spring_k * stretch / distance);
+        V.subInPlace(force[head], spring);
+        V.addInPlace(force[tail], spring);
+      }
+    }
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      const centering = V.scale(nodes[i].pos, parameters.center_k);
+      V.subInPlace(force[i], centering);
+      nodes[i].vel = V.scale(V.add(nodes[i].vel, force[i]), parameters.damping);
+      nodes[i].pos = V.add(nodes[i].pos, nodes[i].vel);
+    }
+
+    frame += 1;
+    if (frame >= parameters.steps) {
+      running = false;
+      playPauseButton.textContent = 'Play';
+    }
+    updateFrameCounter();
+  }
+
+  function projectionAxis(axis) {
+    let angle;
+    let scale;
+
+    if (axis < PRESET_ANGLES_DEGREES.length) {
+      angle = PRESET_ANGLES_DEGREES[axis] * Math.PI / 180;
+      scale = PRESET_SCALES[axis];
+    } else {
+      angle = Math.PI * 2 * axis / Math.max(1, dimension);
+      scale = PRESET_SCALES[PRESET_SCALES.length - 1]
+        + (axis + 1 - PRESET_SCALES.length) * LARGER_DIMENSION_SCALE_INCREMENT;
+    }
+    return [scale * Math.cos(angle), scale * Math.sin(angle)];
+  }
+
+  function project(position) {
+    let x = 0;
+    let y = 0;
+    for (let axis = 0; axis < position.length; axis += 1) {
+      const basis = projectionAxis(axis);
+      x += position[axis] * basis[0];
+      y += position[axis] * basis[1];
+    }
+    return [x, y];
+  }
+
+  function draw() {
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.width / ratio;
+    const height = canvas.height / ratio;
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    if (!graph || nodes.length === 0) return;
+
+    const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const projected = nodes.map(node => project(node.pos));
+    const xs = projected.map(point => point[0]);
+    const ys = projected.map(point => point[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const rangeX = Math.max(1, maxX - minX);
+    const rangeY = Math.max(1, maxY - minY);
+    const viewScale = Math.min(1.2, (width - 120) / rangeX, (height - 100) / rangeY);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const visibleHalfWidth = width / (2 * viewScale);
+    const visibleHalfHeight = height / (2 * viewScale);
+    viewRange.textContent = `View x [${formatCoordinate(centerX - visibleHalfWidth)}, ${formatCoordinate(centerX + visibleHalfWidth)}] · y [${formatCoordinate(centerY - visibleHalfHeight)}, ${formatCoordinate(centerY + visibleHalfHeight)}]`;
+    const toCanvas = point => [
+      width / 2 + (point[0] - centerX) * viewScale,
+      height / 2 + (point[1] - centerY) * viewScale,
+    ];
+
+    const depth = node => node.pos.slice(2).reduce((sum, value) => sum + value, 0);
+    const orderedEdges = [...graph.edges].sort((a, b) => depth(nodes[b.tail]) - depth(nodes[a.tail]));
+    for (const edge of orderedEdges) {
+      const [tailX, tailY] = toCanvas(projected[edge.tail]);
+      const [headX, headY] = toCanvas(projected[edge.head]);
+      const color = edge.sign === 'input' ? '#c2410c' : '#2563eb';
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(headX, headY);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(edge.sign === 'input' ? '-' : '+', (tailX + headX) / 2, (tailY + headY) / 2);
+    }
+
+    const orderedNodes = [...nodes].sort((a, b) => depth(b) - depth(a));
+    for (const node of orderedNodes) {
+      const [x, y] = toCanvas(projected[node.definition.id]);
+      const boxWidth = 64;
+      const boxHeight = 42;
+      ctx.beginPath();
+      ctx.roundRect(x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, 5);
+      ctx.fillStyle = dark ? '#27272a' : '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = dark ? '#a1a1aa' : '#71717a';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const labelLines = node.definition.label.split('\n');
+      ctx.fillStyle = dark ? '#f4f4f5' : '#18181b';
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(labelLines[0], x, y - 7);
+      ctx.fillText(labelLines[1] || '', x, y + 8);
+    }
+  }
+
+  function updateFrameCounter() {
+    frameCounter.textContent = `Frame ${frame} / ${graph ? parameters.steps : 0}`;
+  }
+
+  function formatCoordinate(value) {
+    return Math.abs(value) >= 1000 ? value.toFixed(0) : value.toFixed(1);
+  }
+
+  function animationLoop() {
+    if (running && frame < parameters.steps) simulationStep();
+    draw();
+    window.requestAnimationFrame(animationLoop);
+  }
+
+  for (const control of parameterControls) {
+    control.input.addEventListener('input', () => {
+      parameters[control.key] = control.key === 'steps'
+        ? Number.parseInt(control.input.value, 10)
+        : Number.parseFloat(control.input.value);
+      updateParameterOutput(control);
+      restart();
+    });
+  }
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    try {
+      validateAndLoad(JSON.parse(await file.text()), file.name);
+    } catch (error) {
+      console.error(error);
+      fileName.textContent = `Could not load ${file.name}`;
+    } finally {
+      fileInput.value = '';
+    }
+  });
+
+  playPauseButton.addEventListener('click', () => {
+    if (!graph) return;
+    if (!running && frame >= parameters.steps) restart(false, true);
+    else running = !running;
+    playPauseButton.textContent = running ? 'Pause' : 'Play';
+  });
+
+  stepButton.addEventListener('click', () => {
+    if (!graph || frame >= parameters.steps) return;
+    running = false;
+    playPauseButton.textContent = 'Play';
+    simulationStep();
+    draw();
+  });
+
+  restartButton.addEventListener('click', () => restart(true));
+  window.addEventListener('resize', () => {
+    resize();
+    draw();
+  });
+
+  resize();
+  animationLoop();
+})();
+</script>
+</body>
+</html>
