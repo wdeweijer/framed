@@ -1,5 +1,6 @@
 //! Oriented framed posets.
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use serde::de::Error as _;
@@ -32,12 +33,29 @@ impl Sign {
 /// level `d`, `basis[d][p]` is a finite set of directions of cardinality `d`.
 #[derive(Debug, Clone)]
 pub struct FramedPoset {
+    pub(crate) normal: bool,
     pub(crate) dim: isize,
     pub(crate) basis: Vec<Vec<IntSet>>,
     pub(crate) faces_in: Vec<Vec<IntSet>>,
     pub(crate) faces_out: Vec<Vec<IntSet>>,
     pub(crate) cofaces_in: Vec<Vec<IntSet>>,
     pub(crate) cofaces_out: Vec<Vec<IntSet>>,
+}
+
+impl PartialEq for FramedPoset {
+    fn eq(&self, other: &Self) -> bool {
+        Self::equal(self, other)
+    }
+}
+
+impl Eq for FramedPoset {}
+
+impl Hash for FramedPoset {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.basis.hash(state);
+        self.faces_in.hash(state);
+        self.faces_out.hash(state);
+    }
 }
 
 #[derive(Serialize)]
@@ -127,6 +145,7 @@ impl<'de> Deserialize<'de> for FramedPoset {
         }
 
         let poset = Self {
+            normal: false,
             dim: levels as isize - 1,
             basis: data.basis,
             faces_in: data.faces_in,
@@ -218,6 +237,7 @@ impl FramedPoset {
     ) -> Self {
         let dim = basis.len() as isize - 1;
         let poset = Self {
+            normal: false,
             dim,
             basis,
             faces_in,
@@ -271,6 +291,11 @@ impl FramedPoset {
         self.dim
     }
 
+    /// Whether this framed poset is known to be in canonical normal form.
+    pub fn is_normal(&self) -> bool {
+        self.normal
+    }
+
     /// Number of cells at each basis cardinality.
     pub fn sizes(&self) -> Vec<usize> {
         self.basis.iter().map(Vec::len).collect()
@@ -298,6 +323,9 @@ impl FramedPoset {
     }
 
     /// Structural equality of basis and signed face tables.
+    ///
+    /// The derived [`Self::is_normal`] marker is not part of the mathematical
+    /// framed poset and is therefore ignored.
     pub fn equal(a: &Self, b: &Self) -> bool {
         a.basis == b.basis && a.faces_in == b.faces_in && a.faces_out == b.faces_out
     }
@@ -616,7 +644,16 @@ fn embedding_from_closed_subset(subset: &FramedPosetSubset) -> (Arc<FramedPoset>
 
 #[cfg(test)]
 mod tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
     use super::*;
+
+    fn structural_hash(shape: &FramedPoset) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        shape.hash(&mut hasher);
+        hasher.finish()
+    }
 
     fn tight_arrow() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::from_faces(
@@ -651,11 +688,23 @@ mod tests {
         let empty = FramedPoset::empty();
         assert_eq!(empty.dim(), -1);
         assert_eq!(empty.sizes(), Vec::<usize>::new());
+        assert!(!empty.is_normal());
 
         let point = FramedPoset::point();
         assert_eq!(point.dim(), 0);
         assert_eq!(point.sizes(), vec![1]);
         assert_eq!(point.basis_of(0, 0), &Vec::<usize>::new());
+        assert!(!point.is_normal());
+    }
+
+    #[test]
+    fn equality_and_hash_ignore_the_normal_form_marker() {
+        let shape = tight_arrow();
+        let mut marked_normal = shape.as_ref().clone();
+        marked_normal.normal = true;
+
+        assert_eq!(shape.as_ref(), &marked_normal);
+        assert_eq!(structural_hash(&shape), structural_hash(&marked_normal));
     }
 
     #[test]
@@ -682,6 +731,8 @@ mod tests {
         );
         assert!(json.contains("\"version\": 1"));
         assert!(!json.contains("cofaces"));
+        assert!(!json.contains("normal"));
+        assert!(!restored.is_normal());
     }
 
     #[test]
@@ -782,6 +833,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_signed_face_overlap() {
         let poset = FramedPoset {
+            normal: false,
             dim: 1,
             basis: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![0]]],
@@ -796,6 +848,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_positive_cell_without_faces() {
         let poset = FramedPoset {
+            normal: false,
             dim: 1,
             basis: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![]]],
@@ -810,6 +863,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_non_closed_basis_map() {
         let poset = FramedPoset {
+            normal: false,
             dim: 2,
             basis: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
             faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0]]],
@@ -824,6 +878,7 @@ mod tests {
     #[test]
     fn well_formed_accepts_one_sided_faces_over_every_basis_face() {
         let poset = FramedPoset {
+            normal: false,
             dim: 2,
             basis: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
             faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0, 1]]],
@@ -838,6 +893,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_duplicate_adjacency() {
         let poset = FramedPoset {
+            normal: false,
             dim: 1,
             basis: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![0, 0]]],

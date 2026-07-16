@@ -19,6 +19,6 @@ pub use dot::{
     to_dot_with_params,
 };
 pub use embedding::{Embedding, EmbeddingIntersection, EmbeddingUnion, NO_PREIMAGE};
-pub use isomorphism::isomorphisms;
+pub use isomorphism::{isomorphic, isomorphisms, normalize};
 pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
 pub use random::random_framed_poset;
