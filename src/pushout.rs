@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::embedding::{Embedding, NO_PREIMAGE};
 use crate::intset::{self, IntSet};
-use crate::poset::FramedPoset;
+use crate::isomorphism::isomorphisms;
+use crate::poset::{FramedPoset, Sign, boundary};
 
 /// Binary pushout result.
 #[derive(Debug, Clone)]
@@ -27,6 +28,38 @@ pub struct MultiPushout {
     pub tip: Arc<FramedPoset>,
     pub inl: Embedding,
     pub inrs: Vec<Embedding>,
+}
+
+/// Paste two framed posets along a uniquely isomorphic directional boundary.
+///
+/// The output `direction` boundary of `first` is identified with the input
+/// `direction` boundary of `second`. The left and right pushout injections
+/// therefore have `first` and `second` as their respective domains.
+///
+/// # Panics
+///
+/// Panics unless there is exactly one signed, basis-preserving isomorphism
+/// from the output boundary of `first` to the input boundary of `second`.
+pub fn paste_along_boundary(
+    first: &Arc<FramedPoset>,
+    second: &Arc<FramedPoset>,
+    direction: usize,
+) -> Pushout {
+    let (output_boundary, output_into_first) = boundary(Sign::Output, direction, first);
+    let (input_boundary, input_into_second) = boundary(Sign::Input, direction, second);
+
+    let mut boundary_isomorphisms = isomorphisms(&output_boundary, &input_boundary);
+    assert_eq!(
+        boundary_isomorphisms.len(),
+        1,
+        "direction {direction} boundaries must have exactly one isomorphism"
+    );
+
+    let boundary_isomorphism = boundary_isomorphisms.pop().unwrap();
+    let output_into_second = Embedding::compose(&boundary_isomorphism, &input_into_second);
+    debug_assert!(Arc::ptr_eq(&output_into_first.dom, &output_into_second.dom));
+
+    pushout(&output_into_first, &output_into_second)
 }
 
 /// Compute a binary pushout of embeddings.
@@ -214,7 +247,6 @@ fn alloc_rows(base: &[Vec<IntSet>], total_sizes: &[usize]) -> Vec<Vec<IntSet>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::poset::Sign;
 
     fn point() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::point())
@@ -252,6 +284,18 @@ mod tests {
         assert_eq!(po.tip.basis_of(1, 1), &vec![0]);
         assert_eq!(po.tip.faces_of(Sign::Input, 1, 1), &vec![1]);
         assert_eq!(po.tip.faces_of(Sign::Output, 1, 1), &vec![2]);
+    }
+
+    #[test]
+    fn pastes_two_arrows_along_their_unique_directional_boundaries() {
+        let first = arrow();
+        let second = arrow();
+
+        let pasted = paste_along_boundary(&first, &second, 0);
+
+        assert_eq!(pasted.tip.sizes(), vec![3, 2]);
+        assert_eq!(pasted.inl.dom.sizes(), vec![2, 1]);
+        assert_eq!(pasted.inr.dom.sizes(), vec![2, 1]);
     }
 
     #[cfg(debug_assertions)]

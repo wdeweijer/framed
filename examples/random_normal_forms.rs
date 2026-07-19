@@ -14,8 +14,8 @@ use ofposets::{Embedding, FramedPoset, Sign, boundary, normalize, random_framed_
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
 
-const CELL_COUNT: usize = 8;
-const OUTPUT_DIR: &str = "visualizations/random_8_cells_normal_forms_cubular";
+const CELL_COUNT: usize = 9;
+const OUTPUT_DIR: &str = "visualizations/random_9_cells_normal_forms_cubular";
 const REPORT_INTERVAL: Duration = Duration::from_secs(2);
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SIGN_PAIRS: [(Sign, Sign); 4] = [
