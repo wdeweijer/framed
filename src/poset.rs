@@ -19,7 +19,7 @@ pub enum Sign {
 }
 
 impl Sign {
-    fn opposite(self) -> Self {
+    pub(crate) fn opposite(self) -> Self {
         match self {
             Self::Input => Self::Output,
             Self::Output => Self::Input,

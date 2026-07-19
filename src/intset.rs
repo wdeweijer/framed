@@ -1,7 +1,25 @@
 //! Small sorted integer sets.
 
+use std::error::Error;
+use std::fmt;
+
 /// A sorted, deduplicated vector of `usize`s.
 pub type IntSet = Vec<usize>;
+
+/// The second set contains no direction absent from the first set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoverDirectionError;
+
+impl fmt::Display for CoverDirectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "the second set contains no direction absent from the first"
+        )
+    }
+}
+
+impl Error for CoverDirectionError {}
 
 /// Return true exactly when `xs` is sorted and contains no duplicates.
 pub fn is_sorted_unique(xs: &[usize]) -> bool {
@@ -68,6 +86,25 @@ pub fn is_subset(small: &[usize], big: &[usize]) -> bool {
     i == small.len()
 }
 
+/// Return the first element of `second` that is not in `first`.
+///
+/// Both sets must be sorted and deduplicated.
+pub fn cover_direction(first: &[usize], second: &[usize]) -> Result<usize, CoverDirectionError> {
+    let mut i = 0;
+
+    for &candidate in second {
+        while i < first.len() && first[i] < candidate {
+            i += 1;
+        }
+        if i == first.len() || first[i] != candidate {
+            return Ok(candidate);
+        }
+        i += 1;
+    }
+
+    Err(CoverDirectionError)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +117,22 @@ mod tests {
     #[test]
     fn union_merges_sorted_sets() {
         assert_eq!(union(&vec![0, 2], &vec![1, 2, 4]), vec![0, 1, 2, 4]);
+    }
+
+    #[test]
+    fn cover_direction_finds_the_first_new_element() {
+        assert_eq!(cover_direction(&[0, 2, 4], &[0, 1, 2, 3, 4]), Ok(1));
+        assert_eq!(cover_direction(&[1, 2], &[0, 1, 2]), Ok(0));
+        assert_eq!(cover_direction(&[0, 1], &[0, 1, 5]), Ok(5));
+    }
+
+    #[test]
+    fn cover_direction_errors_when_there_is_no_new_element() {
+        assert_eq!(cover_direction(&[0, 1], &[0, 1]), Err(CoverDirectionError));
+        assert_eq!(
+            cover_direction(&[0, 1, 2], &[0, 2]),
+            Err(CoverDirectionError)
+        );
+        assert_eq!(cover_direction(&[], &[]), Err(CoverDirectionError));
     }
 }
