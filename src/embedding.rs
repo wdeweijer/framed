@@ -189,9 +189,7 @@ impl Embedding {
     /// stronger than asking whether the image cells form a closed subset:
     /// incidences between image cells must also be present in the domain.
     pub fn is_closed(&self) -> bool {
-        if !self.well_formed() {
-            return false;
-        }
+        debug_assert!(self.well_formed());
 
         for dim in 1..self.map.len() {
             for (dom_pos, &cod_pos) in self.map[dim].iter().enumerate() {
@@ -217,7 +215,7 @@ impl Embedding {
         crate::dot::embedding_to_dot(self, renderer)
     }
 
-    fn well_formed(&self) -> bool {
+    pub(crate) fn well_formed(&self) -> bool {
         let dom_sizes = self.dom.sizes();
         let cod_sizes = self.cod.sizes();
 

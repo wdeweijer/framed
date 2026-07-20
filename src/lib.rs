@@ -23,4 +23,6 @@ pub use embedding::{Embedding, EmbeddingIntersection, EmbeddingUnion, NO_PREIMAG
 pub use isomorphism::{isomorphic, isomorphisms, normalize};
 pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
 pub use random::random_framed_poset;
-pub use symmetry::{DirectionImage, SignedPermutation, SymmetryError, transform};
+pub use symmetry::{
+    DirectionImage, SignedPermutation, SymmetryError, transform, transform_embedding,
+};

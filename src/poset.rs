@@ -153,11 +153,7 @@ impl<'de> Deserialize<'de> for FramedPoset {
             cofaces_in,
             cofaces_out,
         };
-        if !poset.well_formed() {
-            return Err(D::Error::custom(
-                "serialized framed poset is not well-formed",
-            ));
-        }
+        debug_assert!(poset.well_formed());
 
         Ok(poset)
     }
@@ -205,9 +201,10 @@ impl FramedPosetSubset {
     /// The ambient framed posets are compared structurally rather than by
     /// pointer identity.
     pub fn is_subset_of(&self, other: &Self) -> bool {
-        self.well_formed()
-            && other.well_formed()
-            && FramedPoset::equal(&self.shape, &other.shape)
+        debug_assert!(self.well_formed());
+        debug_assert!(other.well_formed());
+
+        FramedPoset::equal(&self.shape, &other.shape)
             && self
                 .keep
                 .iter()
@@ -755,8 +752,10 @@ mod tests {
         assert!(serde_json::from_value::<FramedPoset>(json).is_err());
     }
 
+    #[cfg(debug_assertions)]
     #[test]
-    fn deserialization_rejects_poset_that_is_not_well_formed() {
+    #[should_panic(expected = "assertion failed: poset.well_formed()")]
+    fn deserialization_debug_asserts_poset_is_well_formed() {
         let json = serde_json::json!({
             "version": 1,
             "basis": [[[]], [[0]]],
@@ -764,7 +763,7 @@ mod tests {
             "faces_out": [[[]], [[0]]],
         });
 
-        assert!(serde_json::from_value::<FramedPoset>(json).is_err());
+        let _ = serde_json::from_value::<FramedPoset>(json);
     }
 
     #[test]

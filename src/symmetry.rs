@@ -2,7 +2,9 @@
 
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
+use crate::embedding::Embedding;
 use crate::intset;
 use crate::poset::{FramedPoset, Sign};
 
@@ -39,14 +41,6 @@ pub enum SymmetryError {
     DimensionMismatch { first: usize, second: usize },
     /// The poset uses a direction outside the symmetry's ambient dimension.
     DirectionNotCovered { direction: usize, dimension: usize },
-    /// The source is not a well-formed oriented framed poset.
-    MalformedPoset,
-    /// A cover relation does not remove exactly one direction.
-    InvalidCover {
-        dim: usize,
-        cell: usize,
-        face: usize,
-    },
 }
 
 impl fmt::Display for SymmetryError {
@@ -72,12 +66,6 @@ impl fmt::Display for SymmetryError {
             } => write!(
                 f,
                 "poset direction {direction} is outside ambient dimension {dimension}"
-            ),
-            Self::MalformedPoset => write!(f, "source framed poset is not well-formed"),
-            Self::InvalidCover { dim, cell, face } => write!(
-                f,
-                "relation from cell ({dim}, {cell}) to face ({}, {face}) does not remove exactly one direction",
-                dim - 1
             ),
         }
     }
@@ -214,9 +202,7 @@ pub fn transform(
     shape: &FramedPoset,
     symmetry: &SignedPermutation,
 ) -> Result<FramedPoset, SymmetryError> {
-    if !shape.well_formed() {
-        return Err(SymmetryError::MalformedPoset);
-    }
+    debug_assert!(shape.well_formed());
 
     let basis = shape
         .basis
@@ -261,14 +247,14 @@ pub fn transform(
                         shape.basis_of(dim - 1, face),
                         shape.basis_of(dim, cell),
                     )
-                    .map_err(|_| SymmetryError::InvalidCover { dim, cell, face })?;
+                    .expect("a cover in a well-formed OFP removes one direction");
                     let image =
                         symmetry
                             .image_of(direction)
                             .ok_or(SymmetryError::DirectionNotCovered {
                                 direction,
                                 dimension: symmetry.dimension(),
-                    })?;
+                            })?;
                     let target_sign = if image.reflected {
                         sign.opposite()
                     } else {
@@ -290,10 +276,27 @@ pub fn transform(
     Ok(transformed)
 }
 
+/// Apply a signed permutation of directions to an embedding.
+///
+/// The domain and codomain are transformed by the same symmetry. Since the
+/// action preserves cell indices, the forward and inverse cell maps are
+/// unchanged.
+pub fn transform_embedding(
+    embedding: &Embedding,
+    symmetry: &SignedPermutation,
+) -> Result<Embedding, SymmetryError> {
+    debug_assert!(embedding.well_formed());
+
+    let dom = Arc::new(transform(&embedding.dom, symmetry)?);
+    let cod = Arc::new(transform(&embedding.cod, symmetry)?);
+    let transformed = Embedding::make(dom, cod, embedding.map.clone(), embedding.inv.clone());
+
+    debug_assert_eq!(embedding.is_closed(), transformed.is_closed());
+    Ok(transformed)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::poset::boundary;
 
     use super::*;
@@ -454,5 +457,106 @@ mod tests {
             })
         );
         assert!(transform(&arrow(5), &SignedPermutation::identity(6)).is_ok());
+    }
+
+    #[test]
+    fn embedding_action_preserves_maps_and_closedness() {
+        let square = Arc::new(square());
+        let (_, embedding) = boundary(Sign::Input, 0, &square);
+        let symmetry = SignedPermutation::try_new(vec![
+            DirectionImage {
+                direction: 1,
+                reflected: true,
+            },
+            DirectionImage {
+                direction: 0,
+                reflected: false,
+            },
+        ])
+        .unwrap();
+
+        let transformed = transform_embedding(&embedding, &symmetry).unwrap();
+
+        assert_eq!(transformed.map, embedding.map);
+        assert_eq!(transformed.inv, embedding.inv);
+        assert!(FramedPoset::equal(
+            &transformed.dom,
+            &transform(&embedding.dom, &symmetry).unwrap()
+        ));
+        assert!(FramedPoset::equal(
+            &transformed.cod,
+            &transform(&embedding.cod, &symmetry).unwrap()
+        ));
+        assert!(embedding.is_closed());
+        assert!(transformed.is_closed());
+        assert!(!transformed.dom.is_normal());
+        assert!(!transformed.cod.is_normal());
+    }
+
+    #[test]
+    fn embedding_action_respects_composition() {
+        let square = Arc::new(square());
+        let (edge, edge_into_square) = boundary(Sign::Input, 0, &square);
+        let (_, point_into_edge) = boundary(Sign::Output, 1, &edge);
+        let point_into_square = Embedding::compose(&point_into_edge, &edge_into_square);
+        let symmetry = SignedPermutation::from_permutation(vec![1, 0]).unwrap();
+
+        let transformed_composite = transform_embedding(&point_into_square, &symmetry).unwrap();
+        let transformed_point_into_edge = transform_embedding(&point_into_edge, &symmetry).unwrap();
+        let transformed_edge_into_square =
+            transform_embedding(&edge_into_square, &symmetry).unwrap();
+        let composite_of_transforms =
+            Embedding::compose(&transformed_point_into_edge, &transformed_edge_into_square);
+
+        assert!(FramedPoset::equal(
+            &transformed_composite.dom,
+            &composite_of_transforms.dom
+        ));
+        assert!(FramedPoset::equal(
+            &transformed_composite.cod,
+            &composite_of_transforms.cod
+        ));
+        assert_eq!(transformed_composite.map, composite_of_transforms.map);
+        assert_eq!(transformed_composite.inv, composite_of_transforms.inv);
+    }
+
+    #[test]
+    fn inverse_symmetry_restores_an_embedding() {
+        let square = Arc::new(square());
+        let (_, embedding) = boundary(Sign::Input, 1, &square);
+        let symmetry = SignedPermutation::try_new(vec![
+            DirectionImage {
+                direction: 1,
+                reflected: false,
+            },
+            DirectionImage {
+                direction: 0,
+                reflected: true,
+            },
+        ])
+        .unwrap();
+
+        let transformed = transform_embedding(&embedding, &symmetry).unwrap();
+        let restored = transform_embedding(&transformed, &symmetry.inverse()).unwrap();
+
+        assert!(FramedPoset::equal(&restored.dom, &embedding.dom));
+        assert!(FramedPoset::equal(&restored.cod, &embedding.cod));
+        assert_eq!(restored.map, embedding.map);
+        assert_eq!(restored.inv, embedding.inv);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "assertion failed: embedding.well_formed()")]
+    fn embedding_action_debug_asserts_maps_are_well_formed() {
+        let point = Arc::new(FramedPoset::point());
+        let malformed = Embedding {
+            dom: Arc::clone(&point),
+            cod: point,
+            map: vec![vec![1]],
+            inv: vec![vec![0]],
+        };
+
+        let _ = transform_embedding(&malformed, &SignedPermutation::identity(0));
     }
 }
