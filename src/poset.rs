@@ -486,7 +486,6 @@ pub fn boundary(
             Embedding::empty(Arc::clone(shape)),
         )
     } else {
-        let levels = shape.basis.len();
         let mut keep: Vec<Vec<bool>> = shape
             .basis
             .iter()
@@ -494,12 +493,12 @@ pub fn boundary(
             .collect();
 
         let opposite = sign.opposite();
-        for dim in 0..levels {
-            for pos in 0..shape.basis[dim].len() {
+        for (dim, keep_level) in keep.iter_mut().enumerate() {
+            for (pos, is_kept) in keep_level.iter_mut().enumerate() {
                 if shape.is_orthogonal_to(dim, pos, direction)
                     && shape.cofaces_of(opposite, dim, pos).is_empty()
                 {
-                    keep[dim][pos] = true;
+                    *is_kept = true;
                 }
             }
         }
@@ -520,7 +519,6 @@ pub fn boundary_hat(
             Embedding::empty(Arc::clone(shape)),
         )
     } else {
-        let levels = shape.basis.len();
         let mut keep: Vec<Vec<bool>> = shape
             .basis
             .iter()
@@ -528,8 +526,8 @@ pub fn boundary_hat(
             .collect();
 
         let opposite = sign.opposite();
-        for dim in 0..levels {
-            for pos in 0..shape.basis[dim].len() {
+        for (dim, keep_level) in keep.iter_mut().enumerate() {
+            for (pos, is_kept) in keep_level.iter_mut().enumerate() {
                 if shape.is_orthogonal_to(dim, pos, direction)
                     && shape.cofaces_of(opposite, dim, pos).iter().all(|&coface| {
                         shape
@@ -538,7 +536,7 @@ pub fn boundary_hat(
                             .is_err()
                     })
                 {
-                    keep[dim][pos] = true;
+                    *is_kept = true;
                 }
             }
         }
@@ -631,33 +629,33 @@ fn embedding_from_closed_subset(subset: &FramedPosetSubset) -> (Arc<FramedPoset>
     let mut cofaces_in = Vec::with_capacity(levels);
     let mut cofaces_out = Vec::with_capacity(levels);
 
-    for dim in 0..levels {
+    for (dim, old_positions) in map.iter().enumerate() {
         basis.push(
-            map[dim]
+            old_positions
                 .iter()
                 .map(|&old| shape.basis[dim][old].clone())
                 .collect(),
         );
         faces_in.push(
-            map[dim]
+            old_positions
                 .iter()
                 .map(|&old| remap_faces(dim, old, &shape.faces_in))
                 .collect(),
         );
         faces_out.push(
-            map[dim]
+            old_positions
                 .iter()
                 .map(|&old| remap_faces(dim, old, &shape.faces_out))
                 .collect(),
         );
         cofaces_in.push(
-            map[dim]
+            old_positions
                 .iter()
                 .map(|&old| remap_cofaces(dim, old, &shape.cofaces_in))
                 .collect(),
         );
         cofaces_out.push(
-            map[dim]
+            old_positions
                 .iter()
                 .map(|&old| remap_cofaces(dim, old, &shape.cofaces_out))
                 .collect(),

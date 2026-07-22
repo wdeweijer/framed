@@ -422,9 +422,9 @@ fn compass_spring_graph(shape: &FramedPoset) -> SpringGraph {
     let mut node_count = 0;
     let mut max_axis = None::<usize>;
 
-    for dim in 0..sizes.len() {
-        for pos in 0..sizes[dim] {
-            node_of_cell[dim][pos] = node_count;
+    for (dim, level) in node_of_cell.iter_mut().enumerate() {
+        for (pos, node) in level.iter_mut().enumerate() {
+            *node = node_count;
             node_count += 1;
             for &axis in shape.basis_of(dim, pos) {
                 max_axis = Some(max_axis.map_or(axis, |current| current.max(axis)));
@@ -433,8 +433,8 @@ fn compass_spring_graph(shape: &FramedPoset) -> SpringGraph {
     }
 
     let mut edges = Vec::new();
-    for dim in 1..sizes.len() {
-        for pos in 0..sizes[dim] {
+    for (dim, &size) in sizes.iter().enumerate().skip(1) {
+        for pos in 0..size {
             for &face in shape.faces_of(Sign::Input, dim, pos) {
                 edges.push(compass_spring_edge(
                     shape,

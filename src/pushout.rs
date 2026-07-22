@@ -204,8 +204,8 @@ pub fn multi_pushout(base: &Arc<FramedPoset>, spans: &[Span<'_>]) -> MultiPushou
     let inl_inv: Vec<Vec<usize>> = (0..levels)
         .map(|dim| {
             let mut row = vec![NO_PREIMAGE; total_sizes[dim]];
-            for pos in 0..base_level_sizes[dim] {
-                row[pos] = pos;
+            for (pos, value) in row.iter_mut().enumerate().take(base_level_sizes[dim]) {
+                *value = pos;
             }
             row
         })
