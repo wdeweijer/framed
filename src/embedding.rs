@@ -100,6 +100,17 @@ impl Embedding {
         self.is_surjective() && self.is_closed()
     }
 
+    /// Invert an embedding known to be an isomorphism.
+    pub fn inverse_isomorphism(&self) -> Self {
+        debug_assert!(self.is_isomorphism());
+        Self::make(
+            Arc::clone(&self.cod),
+            Arc::clone(&self.dom),
+            self.inv.clone(),
+            self.map.clone(),
+        )
+    }
+
     /// Compose `f: A -> B` with `g: B -> C`, returning `g f: A -> C`.
     ///
     /// The middle framed posets are compared structurally, not by pointer
@@ -543,6 +554,33 @@ mod tests {
         assert!(bijective_with_missing_incidence.is_surjective());
         assert!(!bijective_with_missing_incidence.is_closed());
         assert!(!bijective_with_missing_incidence.is_isomorphism());
+    }
+
+    #[test]
+    fn inverse_isomorphism_swaps_maps_and_undoes_the_original() {
+        let dom = arrow();
+        let cod = reversed_arrow();
+        let isomorphism = Embedding::make(
+            Arc::clone(&dom),
+            Arc::clone(&cod),
+            vec![vec![1, 0], vec![0]],
+            vec![vec![1, 0], vec![0]],
+        );
+
+        let inverse = isomorphism.inverse_isomorphism();
+
+        assert!(FramedPoset::equal(&inverse.dom, &cod));
+        assert!(FramedPoset::equal(&inverse.cod, &dom));
+        assert_eq!(inverse.map, isomorphism.inv);
+        assert_eq!(inverse.inv, isomorphism.map);
+        assert_eq!(
+            Embedding::compose(&isomorphism, &inverse).map,
+            Embedding::id(dom).map
+        );
+        assert_eq!(
+            Embedding::compose(&inverse, &isomorphism).map,
+            Embedding::id(cod).map
+        );
     }
 
     #[test]
