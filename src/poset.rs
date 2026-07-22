@@ -480,7 +480,7 @@ pub fn boundary(
     direction: usize,
     shape: &Arc<FramedPoset>,
 ) -> (Arc<FramedPoset>, Embedding) {
-    let result = if shape.dim < 0 {
+    if shape.dim < 0 {
         (
             Arc::new(FramedPoset::empty()),
             Embedding::empty(Arc::clone(shape)),
@@ -506,10 +506,46 @@ pub fn boundary(
 
         let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
         closure(&subset)
-    };
+    }
+}
 
-    debug_assert!(result.1.is_closed());
-    result
+pub fn boundary_hat(
+    sign: Sign,
+    direction: usize,
+    shape: &Arc<FramedPoset>,
+) -> (Arc<FramedPoset>, Embedding) {
+    if shape.dim < 0 {
+        (
+            Arc::new(FramedPoset::empty()),
+            Embedding::empty(Arc::clone(shape)),
+        )
+    } else {
+        let levels = shape.basis.len();
+        let mut keep: Vec<Vec<bool>> = shape
+            .basis
+            .iter()
+            .map(|level| vec![false; level.len()])
+            .collect();
+
+        let opposite = sign.opposite();
+        for dim in 0..levels {
+            for pos in 0..shape.basis[dim].len() {
+                if shape.is_orthogonal_to(dim, pos, direction)
+                    && shape.cofaces_of(opposite, dim, pos).iter().all(|&coface| {
+                        shape
+                            .basis_of(dim + 1, coface)
+                            .binary_search(&direction)
+                            .is_err()
+                    })
+                {
+                    keep[dim][pos] = true;
+                }
+            }
+        }
+
+        let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
+        closure(&subset)
+    }
 }
 
 /// Compute the smallest closed embedding whose image contains `subset`.
@@ -935,6 +971,42 @@ mod tests {
         let square = square();
 
         let (left, _) = boundary(Sign::Input, 0, &square);
+        assert_eq!(left.basis_of(1, 0), &vec![1]);
+        assert_eq!(left.faces_of(Sign::Input, 1, 0), &vec![0]);
+        assert_eq!(left.faces_of(Sign::Output, 1, 0), &vec![1]);
+    }
+
+    #[test]
+    fn tight_arrow_hat_boundaries() {
+        let arrow = tight_arrow();
+
+        let (input, input_emb) = boundary_hat(Sign::Input, 0, &arrow);
+        assert_eq!(input.sizes(), vec![1]);
+        assert_eq!(input_emb.map, vec![vec![0]]);
+
+        let (output, output_emb) = boundary_hat(Sign::Output, 0, &arrow);
+        assert_eq!(output.sizes(), vec![1]);
+        assert_eq!(output_emb.map, vec![vec![1]]);
+    }
+
+    #[test]
+    fn two_direction_hat_boundaries_differ() {
+        let square = square();
+
+        let (left, left_emb) = boundary_hat(Sign::Input, 0, &square);
+        assert_eq!(left.sizes(), vec![2, 1]);
+        assert_eq!(left_emb.map, vec![vec![0, 2], vec![2]]);
+
+        let (bottom, bottom_emb) = boundary_hat(Sign::Input, 1, &square);
+        assert_eq!(bottom.sizes(), vec![2, 1]);
+        assert_eq!(bottom_emb.map, vec![vec![0, 1], vec![0]]);
+    }
+
+    #[test]
+    fn boundary_hat_closes_downward() {
+        let square = square();
+
+        let (left, _) = boundary_hat(Sign::Input, 0, &square);
         assert_eq!(left.basis_of(1, 0), &vec![1]);
         assert_eq!(left.faces_of(Sign::Input, 1, 0), &vec![0]);
         assert_eq!(left.faces_of(Sign::Output, 1, 0), &vec![1]);
