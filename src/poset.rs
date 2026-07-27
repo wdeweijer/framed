@@ -298,6 +298,11 @@ impl FramedPoset {
         self.basis.iter().map(Vec::len).collect()
     }
 
+    /// Sorted directions occurring in the basis of at least one cell.
+    pub fn active_directions(&self) -> IntSet {
+        intset::collect_sorted(self.basis.iter().flatten().flatten().copied())
+    }
+
     /// Basis of a cell.
     pub fn basis_of(&self, dim: usize, pos: usize) -> &IntSet {
         &self.basis[dim][pos]
@@ -719,13 +724,20 @@ mod tests {
         let empty = FramedPoset::empty();
         assert_eq!(empty.dim(), -1);
         assert_eq!(empty.sizes(), Vec::<usize>::new());
+        assert!(empty.active_directions().is_empty());
         assert!(!empty.is_normal());
 
         let point = FramedPoset::point();
         assert_eq!(point.dim(), 0);
         assert_eq!(point.sizes(), vec![1]);
         assert_eq!(point.basis_of(0, 0), &Vec::<usize>::new());
+        assert!(point.active_directions().is_empty());
         assert!(!point.is_normal());
+    }
+
+    #[test]
+    fn active_directions_are_sorted_and_deduplicated() {
+        assert_eq!(square().active_directions(), vec![0, 1]);
     }
 
     #[test]
