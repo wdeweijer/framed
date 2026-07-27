@@ -20,10 +20,10 @@ use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
 use serde::Serialize;
 
-const CELL_COUNT: usize = 9;
+const CELL_COUNT: usize = 4;
 const SYMMETRY_COUNT: usize = 8;
 const OUTPUT_FILE: &str =
-    "visualizations/random_9_cells_normal_forms_hat_cubular_up_to_symmetry.jsonl";
+    "visualizations/random_4_cells_normal_forms_hat_cubular_up_to_symmetry.jsonl";
 const BUFFER_CAPACITY: usize = 8 * 1024 * 1024;
 const REPORT_INTERVAL: Duration = Duration::from_secs(5);
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);

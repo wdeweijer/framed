@@ -24,7 +24,7 @@ pub use dot::{
 pub use embedding::{Embedding, EmbeddingIntersection, EmbeddingUnion, NO_PREIMAGE};
 pub use isomorphism::{isomorphic, isomorphisms, normalize};
 pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
-pub use random::random_framed_poset;
+pub use random::{random_framed_poset, random_framed_poset_3d};
 pub use symmetry::{
     DirectionImage, SignedPermutation, SymmetryError, transform, transform_embedding,
 };
