@@ -3,241 +3,156 @@
 use std::ops::Range;
 
 use rand::Rng;
+use rand::seq::index;
 
 use crate::intset::IntSet;
 use crate::poset::FramedPoset;
 
-/// Generate a two-dimensional oriented framed poset with exactly `cell_count` cells.
+/// Reusable generator for finite oriented framed posets.
 ///
-/// Cell bases are restricted to `∅`, `{0}`, `{1}`, and `{0, 1}`. Every
-/// result has at least one `{0, 1}` cell. Every oriented framed poset with
-/// those bases, at least one `{0, 1}` cell, and the requested number of cells
-/// has positive probability, up to the ordering of cells within each level.
+/// A generator with `dimension = d` uses precisely the directions
+/// `0, ..., d - 1`. Every generated poset has exactly `cell_count` cells and
+/// at least one cell for each of the `2^d` possible bases. Consequently it
+/// has at least one cell with full basis `{0, ..., d - 1}`.
 ///
-/// # Panics
-///
-/// Panics if `cell_count` is less than four, the minimum number of cells needed
-/// for a well-formed poset containing a `{0, 1}` cell.
-pub fn random_framed_poset<R: Rng + ?Sized>(cell_count: usize, rng: &mut R) -> FramedPoset {
-    assert!(
-        cell_count >= 4,
-        "at least four cells are required to generate a poset with a {{0, 1}} cell"
-    );
-    let profiles = feasible_profiles(cell_count);
-    let profile = profiles[rng.random_range(0..profiles.len())];
-    generate_with_profile(profile, rng)
+/// The Boolean lattice of bases and its cover relations are computed once by
+/// [`Self::new`]. A generator is immutable and can be shared between threads.
+#[derive(Debug)]
+pub struct RandomFramedPosetGenerator {
+    dimension: usize,
+    cell_count: usize,
+    basis_by_mask: Vec<IntSet>,
+    face_masks_by_mask: Vec<Vec<usize>>,
 }
 
-/// Generate a three-dimensional oriented framed poset with exactly `cell_count` cells.
-///
-/// Cell bases are the subsets of `{0, 1, 2}`, and every result has at least
-/// one cell of each basis. Every three-dimensional oriented framed poset on
-/// those directions has positive probability, up to the ordering of cells
-/// within each level.
-///
-/// # Panics
-///
-/// Panics if `cell_count` is less than eight, the minimum number of cells
-/// needed for a well-formed poset containing a `{0, 1, 2}` cell.
-pub fn random_framed_poset_3d<R: Rng + ?Sized>(cell_count: usize, rng: &mut R) -> FramedPoset {
-    assert!(
-        cell_count >= 8,
-        "at least eight cells are required to generate a poset with a {{0, 1, 2}} cell"
-    );
-    let profiles = feasible_profiles_3d(cell_count);
-    let profile = profiles[rng.random_range(0..profiles.len())];
-    generate_3d_with_profile(profile, rng)
-}
+impl RandomFramedPosetGenerator {
+    /// Prepare a generator of `dimension`-dimensional, `cell_count`-cell OFPs.
+    ///
+    /// Every OFP with these active directions, at least one full-dimensional
+    /// cell, and the requested number of cells has positive probability, up
+    /// to the ordering of cells within each level.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `dimension` cannot be represented by the internal bit masks,
+    /// or if fewer than `2^dimension` cells are requested.
+    pub fn new(dimension: usize, cell_count: usize) -> Self {
+        assert!(
+            dimension < usize::BITS as usize,
+            "dimension must be smaller than the number of bits in usize"
+        );
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CellProfile {
-    vertices: usize,
-    edges_0: usize,
-    edges_1: usize,
-    faces: usize,
-}
+        let basis_count = 1usize << dimension;
+        assert!(
+            cell_count >= basis_count,
+            "at least {basis_count} cells are required to generate a \
+             {dimension}-dimensional poset"
+        );
 
-impl CellProfile {
-    fn total(self) -> usize {
-        self.vertices + self.edges_0 + self.edges_1 + self.faces
+        let basis_by_mask: Vec<_> = (0..basis_count)
+            .map(|mask| basis_from_mask(mask, dimension))
+            .collect();
+        let face_masks_by_mask = (0..basis_count)
+            .map(|mask| {
+                (0..dimension)
+                    .filter(|&direction| mask & (1 << direction) != 0)
+                    .map(|direction| mask & !(1 << direction))
+                    .collect()
+            })
+            .collect();
+
+        Self {
+            dimension,
+            cell_count,
+            basis_by_mask,
+            face_masks_by_mask,
+        }
     }
-}
 
-fn feasible_profiles(cell_count: usize) -> Vec<CellProfile> {
-    let mut profiles = Vec::new();
+    /// Number of active directions in every generated OFP.
+    pub fn dimension(&self) -> usize {
+        self.dimension
+    }
 
-    for vertices in 0..=cell_count {
-        let after_vertices = cell_count - vertices;
-        for edges_0 in 0..=after_vertices {
-            let after_edges_0 = after_vertices - edges_0;
-            for edges_1 in 0..=after_edges_0 {
-                let faces = after_edges_0 - edges_1;
-                let edges_have_faces = edges_0 + edges_1 == 0 || vertices > 0;
-                let faces_have_basis_faces = faces == 0 || (edges_0 > 0 && edges_1 > 0);
+    /// Number of cells in every generated OFP.
+    pub fn cell_count(&self) -> usize {
+        self.cell_count
+    }
 
-                if faces > 0 && edges_have_faces && faces_have_basis_faces {
-                    profiles.push(CellProfile {
-                        vertices,
-                        edges_0,
-                        edges_1,
-                        faces,
-                    });
+    /// Generate one random well-formed OFP.
+    pub fn generate<R: Rng + ?Sized>(&self, rng: &mut R) -> FramedPoset {
+        let profile = self.random_profile(rng);
+        self.generate_with_profile(&profile, rng)
+    }
+
+    /// Sample a profile uniformly from the positive compositions of the cell
+    /// count, using the standard stars-and-bars bijection.
+    fn random_profile<R: Rng + ?Sized>(&self, rng: &mut R) -> Vec<usize> {
+        let basis_count = self.basis_by_mask.len();
+        let mut cuts = index::sample(rng, self.cell_count - 1, basis_count - 1).into_vec();
+        for cut in &mut cuts {
+            *cut += 1;
+        }
+        cuts.sort_unstable();
+
+        let mut profile = Vec::with_capacity(basis_count);
+        let mut previous = 0;
+        for cut in cuts.into_iter().chain(std::iter::once(self.cell_count)) {
+            profile.push(cut - previous);
+            previous = cut;
+        }
+        profile
+    }
+
+    fn generate_with_profile<R: Rng + ?Sized>(
+        &self,
+        profile: &[usize],
+        rng: &mut R,
+    ) -> FramedPoset {
+        debug_assert_eq!(profile.len(), self.basis_by_mask.len());
+        debug_assert!(profile.iter().all(|&count| count > 0));
+        debug_assert_eq!(profile.iter().sum::<usize>(), self.cell_count);
+
+        let mut basis = vec![Vec::new(); self.dimension + 1];
+        let mut ranges: Vec<Range<usize>> = vec![0..0; self.basis_by_mask.len()];
+
+        for (mask, cell_basis) in self.basis_by_mask.iter().enumerate() {
+            let level = cell_basis.len();
+            let start = basis[level].len();
+            basis[level].extend((0..profile[mask]).map(|_| cell_basis.clone()));
+            ranges[mask] = start..basis[level].len();
+        }
+
+        let mut faces_in: Vec<Vec<IntSet>> = basis
+            .iter()
+            .map(|level| vec![vec![]; level.len()])
+            .collect();
+        let mut faces_out = faces_in.clone();
+
+        for mask in 1..self.basis_by_mask.len() {
+            let level = self.basis_by_mask[mask].len();
+            for pos in ranges[mask].clone() {
+                for &face_mask in &self.face_masks_by_mask[mask] {
+                    let face_range = ranges[face_mask].clone();
+                    let (input, output) =
+                        random_nonempty_signed_subset(face_range.len(), face_range.start, rng);
+                    faces_in[level][pos].extend(input);
+                    faces_out[level][pos].extend(output);
                 }
+                faces_in[level][pos].sort_unstable();
+                faces_out[level][pos].sort_unstable();
             }
         }
-    }
 
-    debug_assert!(!profiles.is_empty());
-    profiles
-}
-
-fn generate_with_profile<R: Rng + ?Sized>(profile: CellProfile, rng: &mut R) -> FramedPoset {
-    debug_assert!(profile_is_feasible(profile));
-
-    if profile.total() == 0 {
-        return FramedPoset::empty();
-    }
-
-    let edge_count = profile.edges_0 + profile.edges_1;
-    let levels = if profile.faces > 0 {
-        3
-    } else if edge_count > 0 {
-        2
-    } else {
-        1
-    };
-
-    let mut basis = Vec::with_capacity(levels);
-    basis.push(vec![vec![]; profile.vertices]);
-    if levels > 1 {
-        let mut edge_basis = vec![vec![0]; profile.edges_0];
-        edge_basis.extend(vec![vec![1]; profile.edges_1]);
-        basis.push(edge_basis);
-    }
-    if levels > 2 {
-        basis.push(vec![vec![0, 1]; profile.faces]);
-    }
-
-    let mut faces_in: Vec<Vec<IntSet>> = basis
-        .iter()
-        .map(|level| vec![vec![]; level.len()])
-        .collect();
-    let mut faces_out = faces_in.clone();
-
-    for edge in 0..edge_count {
-        let (input, output) = random_nonempty_signed_subset(profile.vertices, 0, rng);
-        faces_in[1][edge] = input;
-        faces_out[1][edge] = output;
-    }
-
-    for face in 0..profile.faces {
-        let (mut input, mut output) = random_nonempty_signed_subset(profile.edges_0, 0, rng);
-        let (input_1, output_1) =
-            random_nonempty_signed_subset(profile.edges_1, profile.edges_0, rng);
-        input.extend(input_1);
-        output.extend(output_1);
-        faces_in[2][face] = input;
-        faces_out[2][face] = output;
-    }
-
-    let poset = FramedPoset::from_faces(basis, faces_in, faces_out);
-    debug_assert!(poset.well_formed());
-    poset
-}
-
-fn profile_is_feasible(profile: CellProfile) -> bool {
-    profile.faces > 0 && profile.vertices > 0 && profile.edges_0 > 0 && profile.edges_1 > 0
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CellProfile3d {
-    by_basis: [usize; 8],
-}
-
-impl CellProfile3d {
-    fn total(self) -> usize {
-        self.by_basis.iter().sum()
+        let poset = FramedPoset::from_faces(basis, faces_in, faces_out);
+        debug_assert_eq!(poset.sizes().iter().sum::<usize>(), self.cell_count);
+        debug_assert!(poset.well_formed());
+        poset
     }
 }
 
-fn feasible_profiles_3d(cell_count: usize) -> Vec<CellProfile3d> {
-    let mut profiles = Vec::new();
-    let mut by_basis = [0; 8];
-    collect_positive_profiles(cell_count, 0, &mut by_basis, &mut profiles);
-    debug_assert!(!profiles.is_empty());
-    profiles
-}
-
-fn collect_positive_profiles(
-    remaining: usize,
-    basis: usize,
-    by_basis: &mut [usize; 8],
-    profiles: &mut Vec<CellProfile3d>,
-) {
-    let remaining_bases = by_basis.len() - basis;
-    if remaining_bases == 1 {
-        if remaining > 0 {
-            by_basis[basis] = remaining;
-            profiles.push(CellProfile3d {
-                by_basis: *by_basis,
-            });
-        }
-        return;
-    }
-
-    let maximum = remaining.saturating_sub(remaining_bases - 1);
-    for count in 1..=maximum {
-        by_basis[basis] = count;
-        collect_positive_profiles(remaining - count, basis + 1, by_basis, profiles);
-    }
-}
-
-fn generate_3d_with_profile<R: Rng + ?Sized>(profile: CellProfile3d, rng: &mut R) -> FramedPoset {
-    debug_assert!(profile.by_basis.iter().all(|&count| count > 0));
-
-    let mut basis = vec![Vec::new(); 4];
-    let mut ranges: [Range<usize>; 8] = std::array::from_fn(|_| 0..0);
-
-    for (mask, range) in ranges.iter_mut().enumerate() {
-        let dim = mask.count_ones() as usize;
-        let start = basis[dim].len();
-        let cell_basis = basis_from_mask(mask);
-        basis[dim].extend((0..profile.by_basis[mask]).map(|_| cell_basis.clone()));
-        *range = start..basis[dim].len();
-    }
-
-    let mut faces_in: Vec<Vec<IntSet>> = basis
-        .iter()
-        .map(|level| vec![vec![]; level.len()])
-        .collect();
-    let mut faces_out = faces_in.clone();
-
-    for mask in 1usize..8 {
-        let dim = mask.count_ones() as usize;
-        for pos in ranges[mask].clone() {
-            for direction in 0..3 {
-                if mask & (1 << direction) == 0 {
-                    continue;
-                }
-                let face_range = ranges[mask & !(1 << direction)].clone();
-                let (input, output) =
-                    random_nonempty_signed_subset(face_range.len(), face_range.start, rng);
-                faces_in[dim][pos].extend(input);
-                faces_out[dim][pos].extend(output);
-            }
-            faces_in[dim][pos].sort_unstable();
-            faces_out[dim][pos].sort_unstable();
-        }
-    }
-
-    let poset = FramedPoset::from_faces(basis, faces_in, faces_out);
-    debug_assert_eq!(profile.total(), poset.sizes().iter().sum::<usize>());
-    debug_assert!(poset.well_formed());
-    poset
-}
-
-fn basis_from_mask(mask: usize) -> IntSet {
-    (0..3)
+fn basis_from_mask(mask: usize, dimension: usize) -> IntSet {
+    (0..dimension)
         .filter(|&direction| mask & (1 << direction) != 0)
         .collect()
 }
@@ -276,117 +191,128 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generates_the_requested_number_of_cells() {
+    fn generates_well_formed_posets_in_arbitrary_small_dimensions() {
         let mut rng = SmallRng::seed_from_u64(0x0f_50_5e_75);
 
-        for cell_count in 4..=20 {
-            for _ in 0..64 {
-                let poset = random_framed_poset(cell_count, &mut rng);
-                assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
-                assert!(poset.sizes().get(2).is_some_and(|&size| size > 0));
-                assert_eq!(poset.basis_of(2, 0), &vec![0, 1]);
-                assert!(poset.well_formed());
+        for dimension in 0..=4 {
+            let minimum = 1usize << dimension;
+            for cell_count in minimum..=minimum + 4 {
+                let generator = RandomFramedPosetGenerator::new(dimension, cell_count);
+
+                for _ in 0..32 {
+                    let poset = generator.generate(&mut rng);
+                    assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
+                    assert_eq!(poset.dim(), dimension as isize);
+                    assert_eq!(
+                        poset.active_directions(),
+                        (0..dimension).collect::<Vec<_>>()
+                    );
+                    assert!(all_bases_occur(&poset, dimension));
+                    assert!(poset.well_formed());
+                }
             }
         }
     }
 
     #[test]
-    #[should_panic(expected = "at least four cells are required")]
-    fn rejects_cell_count_too_small_for_a_two_directional_cell() {
-        let mut rng = SmallRng::seed_from_u64(0);
-        random_framed_poset(3, &mut rng);
+    fn minimum_profile_has_one_cell_per_basis() {
+        let mut rng = SmallRng::seed_from_u64(0x08);
+
+        for dimension in 0..=4 {
+            let basis_count = 1usize << dimension;
+            let generator = RandomFramedPosetGenerator::new(dimension, basis_count);
+            let poset = generator.generate(&mut rng);
+            let mut expected_sizes = vec![0; dimension + 1];
+            for mask in 0usize..basis_count {
+                expected_sizes[mask.count_ones() as usize] += 1;
+            }
+
+            assert_eq!(poset.sizes(), expected_sizes);
+            assert!(all_bases_occur(&poset, dimension));
+            assert!(poset.well_formed());
+        }
     }
 
     #[test]
-    fn every_feasible_profile_generates_a_well_formed_poset() {
-        let mut rng = SmallRng::seed_from_u64(0x0ba5_15c1_05ed);
+    #[should_panic(expected = "at least 8 cells are required")]
+    fn rejects_too_few_cells() {
+        RandomFramedPosetGenerator::new(3, 7);
+    }
 
-        for cell_count in 4..=20 {
-            for profile in feasible_profiles(cell_count) {
-                assert!(profile.faces > 0);
-                let poset = generate_with_profile(profile, &mut rng);
-                assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
-                assert!(poset.well_formed());
+    #[test]
+    fn every_small_feasible_profile_generates_a_well_formed_poset() {
+        let mut rng = SmallRng::seed_from_u64(0x03_ba_51_51);
+
+        for dimension in 0..=3 {
+            let basis_count = 1usize << dimension;
+            for cell_count in basis_count..=basis_count + 3 {
+                let generator = RandomFramedPosetGenerator::new(dimension, cell_count);
+                for profile in feasible_profiles_for_test(basis_count, cell_count) {
+                    let poset = generator.generate_with_profile(&profile, &mut rng);
+                    assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
+                    assert!(all_bases_occur(&poset, dimension));
+                    assert!(poset.well_formed());
+                }
             }
         }
     }
 
     #[test]
     fn generation_is_reproducible_from_the_rng_seed() {
+        let first_generator = RandomFramedPosetGenerator::new(4, 20);
+        let second_generator = RandomFramedPosetGenerator::new(4, 20);
         let mut first_rng = SmallRng::seed_from_u64(42);
         let mut second_rng = SmallRng::seed_from_u64(42);
 
-        for cell_count in 4..=20 {
-            let first = random_framed_poset(cell_count, &mut first_rng);
-            let second = random_framed_poset(cell_count, &mut second_rng);
+        for _ in 0..64 {
+            let first = first_generator.generate(&mut first_rng);
+            let second = second_generator.generate(&mut second_rng);
             assert!(FramedPoset::equal(&first, &second));
         }
     }
 
     #[test]
-    fn generates_well_formed_three_dimensional_posets() {
-        let mut rng = SmallRng::seed_from_u64(0x03_d1_6e_51_0a);
+    fn generator_reports_its_configuration() {
+        let generator = RandomFramedPosetGenerator::new(3, 12);
 
-        for cell_count in 8..=20 {
-            for _ in 0..64 {
-                let poset = random_framed_poset_3d(cell_count, &mut rng);
-                assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
-                assert_eq!(poset.dim(), 3);
-                assert_eq!(poset.active_directions(), vec![0, 1, 2]);
-                assert!(all_three_dimensional_bases_occur(&poset));
-                assert!(poset.well_formed());
-            }
-        }
+        assert_eq!(generator.dimension(), 3);
+        assert_eq!(generator.cell_count(), 12);
     }
 
-    #[test]
-    fn minimum_three_dimensional_profile_has_one_cell_per_basis() {
-        let mut rng = SmallRng::seed_from_u64(0x08);
-        let poset = random_framed_poset_3d(8, &mut rng);
-
-        assert_eq!(poset.sizes(), vec![1, 3, 3, 1]);
-        assert!(all_three_dimensional_bases_occur(&poset));
-        assert!(poset.well_formed());
-    }
-
-    #[test]
-    #[should_panic(expected = "at least eight cells are required")]
-    fn rejects_cell_count_too_small_for_a_three_dimensional_cell() {
-        let mut rng = SmallRng::seed_from_u64(0);
-        random_framed_poset_3d(7, &mut rng);
-    }
-
-    #[test]
-    fn every_small_three_dimensional_profile_is_well_formed() {
-        let mut rng = SmallRng::seed_from_u64(0x03_ba_51_51);
-
-        for cell_count in 8..=12 {
-            for profile in feasible_profiles_3d(cell_count) {
-                let poset = generate_3d_with_profile(profile, &mut rng);
-                assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
-                assert!(all_three_dimensional_bases_occur(&poset));
-                assert!(poset.well_formed());
-            }
-        }
-    }
-
-    #[test]
-    fn three_dimensional_generation_is_reproducible_from_the_rng_seed() {
-        let mut first_rng = SmallRng::seed_from_u64(43);
-        let mut second_rng = SmallRng::seed_from_u64(43);
-
-        for cell_count in 8..=20 {
-            let first = random_framed_poset_3d(cell_count, &mut first_rng);
-            let second = random_framed_poset_3d(cell_count, &mut second_rng);
-            assert!(FramedPoset::equal(&first, &second));
-        }
-    }
-
-    fn all_three_dimensional_bases_occur(poset: &FramedPoset) -> bool {
-        (0usize..8).all(|mask| {
-            let expected = basis_from_mask(mask);
-            let dim = expected.len();
-            (0..poset.sizes()[dim]).any(|pos| poset.basis_of(dim, pos) == &expected)
+    fn all_bases_occur(poset: &FramedPoset, dimension: usize) -> bool {
+        (0usize..1usize << dimension).all(|mask| {
+            let expected = basis_from_mask(mask, dimension);
+            let level = expected.len();
+            (0..poset.sizes()[level]).any(|pos| poset.basis_of(level, pos) == &expected)
         })
+    }
+
+    fn feasible_profiles_for_test(basis_count: usize, cell_count: usize) -> Vec<Vec<usize>> {
+        let mut profiles = Vec::new();
+        let mut profile = vec![0; basis_count];
+        collect_profiles(cell_count, 0, &mut profile, &mut profiles);
+        profiles
+    }
+
+    fn collect_profiles(
+        remaining: usize,
+        basis: usize,
+        profile: &mut [usize],
+        profiles: &mut Vec<Vec<usize>>,
+    ) {
+        let remaining_bases = profile.len() - basis;
+        if remaining_bases == 1 {
+            if remaining > 0 {
+                profile[basis] = remaining;
+                profiles.push(profile.to_vec());
+            }
+            return;
+        }
+
+        let maximum = remaining.saturating_sub(remaining_bases - 1);
+        for count in 1..=maximum {
+            profile[basis] = count;
+            collect_profiles(remaining - count, basis + 1, profile, profiles);
+        }
     }
 }

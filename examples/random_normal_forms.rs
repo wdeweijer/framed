@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use ofposets::{Embedding, FramedPoset, Sign, boundary, normalize, random_framed_poset};
+use ofposets::{Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, boundary, normalize};
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
 
@@ -33,6 +33,15 @@ struct Representative {
     count: u64,
 }
 
+struct WorkerContext<'a> {
+    generator: &'a RandomFramedPosetGenerator,
+    output_dir: &'a Path,
+    representatives: &'a Representatives,
+    generated: &'a AtomicU64,
+    stop: &'a AtomicBool,
+    worker_error: &'a Mutex<Option<String>>,
+}
+
 struct RawModeGuard;
 
 impl RawModeGuard {
@@ -51,6 +60,7 @@ impl Drop for RawModeGuard {
 fn main() -> io::Result<()> {
     let seed = OsRng.try_next_u64().map_err(io::Error::other)?;
     let worker_count = (thread::available_parallelism()?.get() / 2).max(1);
+    let generator = RandomFramedPosetGenerator::new(2, CELL_COUNT);
     let output_dir = Arc::new(PathBuf::from(OUTPUT_DIR));
 
     if output_dir.exists() {
@@ -71,6 +81,7 @@ fn main() -> io::Result<()> {
 
     let run_result = thread::scope(|scope| {
         for worker in 0..worker_count {
+            let generator = &generator;
             let output_dir = Arc::clone(&output_dir);
             let representatives = Arc::clone(&representatives);
             let generated = Arc::clone(&generated);
@@ -78,15 +89,15 @@ fn main() -> io::Result<()> {
             let worker_error = Arc::clone(&worker_error);
 
             scope.spawn(move || {
-                sample_worker(
-                    worker,
-                    seed,
-                    &output_dir,
-                    &representatives,
-                    &generated,
-                    &stop,
-                    &worker_error,
-                );
+                let context = WorkerContext {
+                    generator,
+                    output_dir: &output_dir,
+                    representatives: &representatives,
+                    generated: &generated,
+                    stop: &stop,
+                    worker_error: &worker_error,
+                };
+                sample_worker(worker, seed, context);
             });
         }
 
@@ -110,20 +121,12 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn sample_worker(
-    worker: usize,
-    seed: u64,
-    output_dir: &Path,
-    representatives: &Representatives,
-    generated: &AtomicU64,
-    stop: &AtomicBool,
-    worker_error: &Mutex<Option<String>>,
-) {
+fn sample_worker(worker: usize, seed: u64, context: WorkerContext<'_>) {
     let mut rng = SmallRng::seed_from_u64(worker_seed(seed, worker));
 
-    while !stop.load(Ordering::Acquire) {
-        let shape = Arc::new(random_framed_poset(CELL_COUNT, &mut rng));
-        generated.fetch_add(1, Ordering::Relaxed);
+    while !context.stop.load(Ordering::Acquire) {
+        let shape = Arc::new(context.generator.generate(&mut rng));
+        context.generated.fetch_add(1, Ordering::Relaxed);
         if !is_cubular(&shape) {
             continue;
         }
@@ -132,7 +135,7 @@ fn sample_worker(
         debug_assert!(normal.is_normal());
 
         let new_representative = {
-            let mut representatives = representatives.lock().unwrap();
+            let mut representatives = context.representatives.lock().unwrap();
             if let Some(representative) = representatives.get_mut(&normal) {
                 representative.count = representative.count.saturating_add(1);
                 None
@@ -144,13 +147,13 @@ fn sample_worker(
         };
 
         if let Some((id, normal)) = new_representative
-            && let Err(error) = write_representative(output_dir, id, &normal)
+            && let Err(error) = write_representative(context.output_dir, id, &normal)
         {
-            let mut first_error = worker_error.lock().unwrap();
+            let mut first_error = context.worker_error.lock().unwrap();
             if first_error.is_none() {
                 *first_error = Some(format!("worker {}: {error}", worker + 1));
             }
-            stop.store(true, Ordering::Release);
+            context.stop.store(true, Ordering::Release);
             return;
         }
     }

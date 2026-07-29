@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use ofposets::poset::boundary_hat;
 use ofposets::{
-    DirectionImage, Embedding, FramedPoset, Sign, SignedPermutation, random_framed_poset,
+    DirectionImage, Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, SignedPermutation,
     transform, transform_embedding,
 };
 use rand::rngs::{OsRng, SmallRng};
@@ -19,6 +19,7 @@ fn main() -> io::Result<()> {
     let (sample_count, seed) = arguments()?;
     let symmetries = two_dimensional_symmetries();
     let mut rng = SmallRng::seed_from_u64(seed);
+    let generator = RandomFramedPosetGenerator::new(2, CELL_COUNT);
     let started = Instant::now();
 
     println!(
@@ -26,7 +27,7 @@ fn main() -> io::Result<()> {
     );
 
     for sample in 1..=sample_count {
-        let shape = Arc::new(random_framed_poset(CELL_COUNT, &mut rng));
+        let shape = Arc::new(generator.generate(&mut rng));
         check_equivariance(&shape, &symmetries, seed, sample)?;
 
         if sample.is_multiple_of(REPORT_EVERY) || sample == sample_count {
@@ -34,9 +35,7 @@ fn main() -> io::Result<()> {
         }
     }
 
-    println!(
-        "boundary was equivariant under all eight symmetries for all {sample_count} samples"
-    );
+    println!("boundary was equivariant under all eight symmetries for all {sample_count} samples");
     Ok(())
 }
 

@@ -1,5 +1,6 @@
 //! Oriented framed posets.
 
+use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -301,6 +302,90 @@ impl FramedPoset {
     /// Sorted directions occurring in the basis of at least one cell.
     pub fn active_directions(&self) -> IntSet {
         intset::collect_sorted(self.basis.iter().flatten().flatten().copied())
+    }
+
+    /// Whether the undirected Hasse diagram is connected.
+    ///
+    /// Input and output cover relations are both treated as undirected edges.
+    /// The empty framed poset is not connected.
+    pub fn is_connected(&self) -> bool {
+        let Some((start_dim, start_pos)) = self
+            .basis
+            .iter()
+            .enumerate()
+            .find_map(|(dim, level)| (!level.is_empty()).then_some((dim, 0)))
+        else {
+            return false;
+        };
+
+        let mut seen: Vec<Vec<bool>> = self
+            .basis
+            .iter()
+            .map(|level| vec![false; level.len()])
+            .collect();
+        let mut queue = VecDeque::from([(start_dim, start_pos)]);
+        seen[start_dim][start_pos] = true;
+
+        while let Some((dim, pos)) = queue.pop_front() {
+            if dim > 0 {
+                for &face in self.faces_in[dim][pos]
+                    .iter()
+                    .chain(&self.faces_out[dim][pos])
+                {
+                    if !seen[dim - 1][face] {
+                        seen[dim - 1][face] = true;
+                        queue.push_back((dim - 1, face));
+                    }
+                }
+            }
+
+            if dim + 1 < self.basis.len() {
+                for &coface in self.cofaces_in[dim][pos]
+                    .iter()
+                    .chain(&self.cofaces_out[dim][pos])
+                {
+                    if !seen[dim + 1][coface] {
+                        seen[dim + 1][coface] = true;
+                        queue.push_back((dim + 1, coface));
+                    }
+                }
+            }
+        }
+
+        seen.iter().flatten().all(|&cell| cell)
+    }
+
+    /// Whether this framed poset and all its directional boundaries are
+    /// connected and have only the identity automorphism.
+    pub fn is_rigid(&self) -> bool {
+        if !self.is_connected() {
+            return false;
+        }
+
+        if !self.active_directions().into_iter().all(|direction| {
+            [Sign::Input, Sign::Output].into_iter().all(|sign| {
+                let (boundary, _) = boundary_hat(sign, direction, &shape);
+                boundary.is_rigid()
+            })
+        }) {
+            return false;
+        }
+
+        let shape = Arc::new(self.clone());
+        let automorphisms = crate::isomorphism::isomorphisms(&shape, &shape);
+        let [automorphism] = automorphisms.as_slice() else {
+            return false;
+        };
+
+        if !automorphism
+            .map
+            .iter()
+            .all(|level| level.iter().enumerate().all(|(cell, &image)| image == cell))
+        {
+            return false;
+        }
+
+        true
     }
 
     /// Basis of a cell.
@@ -738,6 +823,63 @@ mod tests {
     #[test]
     fn active_directions_are_sorted_and_deduplicated() {
         assert_eq!(square().active_directions(), vec![0, 1]);
+    }
+
+    #[test]
+    fn connectivity_of_empty_point_and_connected_shapes() {
+        assert!(!FramedPoset::empty().is_connected());
+        assert!(FramedPoset::point().is_connected());
+        assert!(tight_arrow().is_connected());
+        assert!(square().is_connected());
+    }
+
+    #[test]
+    fn connectivity_rejects_an_arrow_with_an_isolated_point() {
+        let disconnected = FramedPoset::from_faces(
+            vec![vec![vec![], vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![], vec![]], vec![vec![1]]],
+        );
+
+        assert!(!disconnected.is_connected());
+    }
+
+    #[test]
+    fn rigidity_requires_connectedness_and_trivial_automorphisms() {
+        let interchangeable_half_edges = FramedPoset::from_faces(
+            vec![vec![vec![]], vec![vec![0], vec![0]]],
+            vec![vec![vec![]], vec![vec![0], vec![0]]],
+            vec![vec![vec![]], vec![vec![], vec![]]],
+        );
+
+        assert!(!FramedPoset::empty().is_rigid());
+        assert!(FramedPoset::point().is_rigid());
+        assert!(tight_arrow().is_rigid());
+        assert!(interchangeable_half_edges.is_connected());
+        assert!(!interchangeable_half_edges.is_rigid());
+    }
+
+    #[test]
+    fn rigidity_is_recursive_over_all_boundaries() {
+        let half_arrow = Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![]], vec![vec![0]]],
+            vec![vec![vec![]], vec![vec![0]]],
+            vec![vec![vec![]], vec![vec![]]],
+        ));
+
+        assert!(half_arrow.is_connected());
+        assert_eq!(
+            crate::isomorphism::isomorphisms(&half_arrow, &half_arrow).len(),
+            1
+        );
+        assert!(
+            boundary_hat(Sign::Output, 0, &half_arrow)
+                .0
+                .sizes()
+                .is_empty()
+        );
+        assert!(!half_arrow.is_rigid());
+        assert!(square().is_rigid());
     }
 
     #[test]

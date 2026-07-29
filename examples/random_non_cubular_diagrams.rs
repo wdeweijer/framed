@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use ofposets::{
-    Embedding, FramedPoset, FramedPosetSubset, Renderer, Sign, boundary, embedding_to_dot,
-    random_framed_poset, to_dot,
+    Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Renderer, Sign,
+    boundary, embedding_to_dot, to_dot,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
@@ -36,16 +36,20 @@ struct SearchMatch {
 fn main() -> std::io::Result<()> {
     let seed = OsRng.try_next_u64().map_err(std::io::Error::other)?;
     let worker_count = thread::available_parallelism()?.get();
+    let generator = RandomFramedPosetGenerator::new(2, CELL_COUNT);
     let found = Arc::new(AtomicBool::new(false));
     let attempts = Arc::new(AtomicUsize::new(0));
     let (sender, receiver) = mpsc::channel();
 
     let matched = thread::scope(|scope| {
         for worker in 0..worker_count {
+            let generator = &generator;
             let found = Arc::clone(&found);
             let attempts = Arc::clone(&attempts);
             let sender = sender.clone();
-            scope.spawn(move || search_worker(worker, seed, found, attempts, sender));
+            scope.spawn(move || {
+                search_worker(worker, seed, generator, found, attempts, sender);
+            });
         }
         drop(sender);
 
@@ -83,6 +87,7 @@ fn main() -> std::io::Result<()> {
 fn search_worker(
     worker: usize,
     seed: u64,
+    generator: &RandomFramedPosetGenerator,
     found: Arc<AtomicBool>,
     attempts: Arc<AtomicUsize>,
     sender: mpsc::Sender<SearchMatch>,
@@ -91,7 +96,7 @@ fn search_worker(
 
     while !found.load(Ordering::Acquire) {
         let candidate = attempts.fetch_add(1, Ordering::Relaxed) + 1;
-        let shape = Arc::new(random_framed_poset(CELL_COUNT, &mut rng));
+        let shape = Arc::new(generator.generate(&mut rng));
         if is_cubular(&shape) {
             continue;
         }

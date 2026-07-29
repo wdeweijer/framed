@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use ofposets::poset::boundary_hat;
 use ofposets::pushout::{Pushout, pushout};
 use ofposets::{
-    Embedding, FramedPoset, Renderer, Sign, embedding_to_dot, is_cubular, is_strongly_cubular,
-    isomorphisms, normalize, random_framed_poset_3d, to_dot,
+    Embedding, FramedPoset, RandomFramedPosetGenerator, Renderer, Sign, embedding_to_dot,
+    is_cubular, is_strongly_cubular, isomorphisms, normalize, to_dot,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{Rng, SeedableRng, TryRngCore};
@@ -103,6 +103,7 @@ struct Statistics {
 
 fn main() -> io::Result<()> {
     let options = parse_options()?;
+    let generator = RandomFramedPosetGenerator::new(DIRECTION_COUNT, options.cell_count);
     println!(
         "generating {} {}cubular {}-cell 3D OFPs on {} threads (seed {:#018x})",
         options.shape_count,
@@ -116,7 +117,7 @@ fn main() -> io::Result<()> {
         options.seed
     );
 
-    let (shapes, candidates) = generate_shapes(options)?;
+    let (shapes, candidates) = generate_shapes(options, &generator)?;
     println!(
         "retained {} shapes from {candidates} generated candidates",
         shapes.len()
@@ -232,7 +233,10 @@ fn parse_seed(value: &str) -> io::Result<u64> {
     .map_err(|_| invalid_input(format!("invalid seed {value:?}")))
 }
 
-fn generate_shapes(options: Options) -> io::Result<(Vec<Arc<FramedPoset>>, usize)> {
+fn generate_shapes(
+    options: Options,
+    generator: &RandomFramedPosetGenerator,
+) -> io::Result<(Vec<Arc<FramedPoset>>, usize)> {
     let mut shapes = Vec::with_capacity(options.shape_count);
     let mut candidates = 0usize;
     let mut next_report = Instant::now() + REPORT_INTERVAL;
@@ -241,7 +245,7 @@ fn generate_shapes(options: Options) -> io::Result<(Vec<Arc<FramedPoset>>, usize
         let batch_end = candidates
             .checked_add(GENERATION_BATCH_SIZE)
             .ok_or_else(|| invalid_data("candidate counter overflow"))?;
-        let mut accepted = generate_candidate_batch(options, candidates, batch_end);
+        let mut accepted = generate_candidate_batch(options, generator, candidates, batch_end);
         accepted.sort_unstable_by_key(|(ticket, _)| *ticket);
         shapes.extend(
             accepted
@@ -265,6 +269,7 @@ fn generate_shapes(options: Options) -> io::Result<(Vec<Arc<FramedPoset>>, usize
 
 fn generate_candidate_batch(
     options: Options,
+    generator: &RandomFramedPosetGenerator,
     start: usize,
     end: usize,
 ) -> Vec<(usize, Arc<FramedPoset>)> {
@@ -283,7 +288,7 @@ fn generate_candidate_batch(
                         let stream = u64::try_from(ticket)
                             .expect("candidate ticket must fit into a u64 seed");
                         let mut rng = SmallRng::seed_from_u64(derived_seed(options.seed, stream));
-                        let shape = Arc::new(random_framed_poset_3d(options.cell_count, &mut rng));
+                        let shape = Arc::new(generator.generate(&mut rng));
                         let is_accepted = if options.require_strong {
                             is_strongly_cubular(&shape)
                         } else {
@@ -870,12 +875,14 @@ mod tests {
             require_strong: false,
             seed: 1,
         };
-        let serial = generate_candidate_batch(options, 0, 512);
+        let generator = RandomFramedPosetGenerator::new(DIRECTION_COUNT, options.cell_count);
+        let serial = generate_candidate_batch(options, &generator, 0, 512);
         let parallel = generate_candidate_batch(
             Options {
                 worker_count: 4,
                 ..options
             },
+            &generator,
             0,
             512,
         );
