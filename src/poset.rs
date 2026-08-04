@@ -362,6 +362,8 @@ impl FramedPoset {
             return false;
         }
 
+        let shape = Arc::new(self.clone());
+
         if !self.active_directions().into_iter().all(|direction| {
             [Sign::Input, Sign::Output].into_iter().all(|sign| {
                 let (boundary, _) = boundary_hat(sign, direction, &shape);
@@ -371,7 +373,6 @@ impl FramedPoset {
             return false;
         }
 
-        let shape = Arc::new(self.clone());
         let automorphisms = crate::isomorphism::isomorphisms(&shape, &shape);
         let [automorphism] = automorphisms.as_slice() else {
             return false;
@@ -559,6 +560,26 @@ impl FramedPoset {
         face < self.basis[dim - 1].len()
             && intset::is_subset(&self.basis[dim - 1][face], &self.basis[dim][pos])
     }
+}
+
+/// Increase every direction in every cell basis by one.
+///
+/// Signed cover relations and cell indices are unchanged. The result is not
+/// marked as normalized.
+///
+/// # Panics
+///
+/// Panics if a direction is already [`usize::MAX`].
+pub fn shift(shape: &FramedPoset) -> FramedPoset {
+    let mut shifted = shape.clone();
+    for direction in shifted.basis.iter_mut().flatten().flatten() {
+        *direction = direction
+            .checked_add(1)
+            .expect("cannot shift direction usize::MAX");
+    }
+    shifted.normal = false;
+    debug_assert!(shifted.well_formed());
+    shifted
 }
 
 /// Compute the directional boundary of a framed poset.
@@ -823,6 +844,23 @@ mod tests {
     #[test]
     fn active_directions_are_sorted_and_deduplicated() {
         assert_eq!(square().active_directions(), vec![0, 1]);
+    }
+
+    #[test]
+    fn shift_increments_bases_and_preserves_signed_adjacency() {
+        let original = square();
+        let shifted = shift(&original);
+
+        assert_eq!(shifted.active_directions(), vec![1, 2]);
+        assert_eq!(shifted.basis_of(1, 0), &vec![1]);
+        assert_eq!(shifted.basis_of(1, 2), &vec![2]);
+        assert_eq!(shifted.basis_of(2, 0), &vec![1, 2]);
+        assert_eq!(shifted.faces_in, original.faces_in);
+        assert_eq!(shifted.faces_out, original.faces_out);
+        assert_eq!(shifted.cofaces_in, original.cofaces_in);
+        assert_eq!(shifted.cofaces_out, original.cofaces_out);
+        assert!(!shifted.is_normal());
+        assert!(shifted.well_formed());
     }
 
     #[test]

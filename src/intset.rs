@@ -70,6 +70,19 @@ pub fn union(a: &IntSet, b: &IntSet) -> IntSet {
     out
 }
 
+/// Return true when two sorted sets have no element in common.
+pub fn is_disjoint(a: &[usize], b: &[usize]) -> bool {
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        match a[i].cmp(&b[j]) {
+            std::cmp::Ordering::Less => i += 1,
+            std::cmp::Ordering::Greater => j += 1,
+            std::cmp::Ordering::Equal => return false,
+        }
+    }
+    true
+}
+
 /// Return true if every element of `small` lies in `big`.
 pub fn is_subset(small: &[usize], big: &[usize]) -> bool {
     let (mut i, mut j) = (0, 0);
@@ -117,6 +130,13 @@ mod tests {
     #[test]
     fn union_merges_sorted_sets() {
         assert_eq!(union(&vec![0, 2], &vec![1, 2, 4]), vec![0, 1, 2, 4]);
+    }
+
+    #[test]
+    fn disjointness_uses_sorted_set_intersection() {
+        assert!(is_disjoint(&[0, 2], &[1, 3]));
+        assert!(is_disjoint(&[], &[0]));
+        assert!(!is_disjoint(&[0, 2, 4], &[1, 2, 3]));
     }
 
     #[test]
