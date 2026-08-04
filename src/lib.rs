@@ -11,6 +11,7 @@ pub mod dot;
 pub mod embedding;
 pub mod intset;
 pub mod isomorphism;
+pub mod orthogonal;
 pub mod poset;
 pub mod pushout;
 pub mod random;
@@ -23,7 +24,11 @@ pub use dot::{
 };
 pub use embedding::{Embedding, EmbeddingIntersection, EmbeddingUnion, NO_PREIMAGE};
 pub use isomorphism::{isomorphic, isomorphisms, normalize};
-pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
+pub use orthogonal::{
+    orthogonal_product, orthogonal_product_associator, orthogonal_product_commutator,
+    orthogonal_product_embedding,
+};
+pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure, shift};
 pub use random::RandomFramedPosetGenerator;
 pub use symmetry::{
     DirectionImage, SignedPermutation, SymmetryError, transform, transform_embedding,
