@@ -297,7 +297,7 @@ pub fn transform_embedding(
 
 #[cfg(test)]
 mod tests {
-    use crate::poset::boundary;
+    use crate::poset::{BoundaryMode, boundary};
 
     use super::*;
 
@@ -434,11 +434,16 @@ mod tests {
 
         for source_sign in [Sign::Input, Sign::Output] {
             for source_direction in 0..2 {
-                let (source_boundary, _) = boundary(source_sign, source_direction, &shape);
+                let (source_boundary, _) =
+                    boundary(BoundaryMode::Plain, source_sign, source_direction, &shape);
                 let transformed_boundary = transform(&source_boundary, &symmetry).unwrap();
                 let image = symmetry.image_of(source_direction).unwrap();
-                let (target_boundary, _) =
-                    boundary(source_sign, image.direction, &transformed_shape);
+                let (target_boundary, _) = boundary(
+                    BoundaryMode::Plain,
+                    source_sign,
+                    image.direction,
+                    &transformed_shape,
+                );
 
                 assert!(FramedPoset::equal(&transformed_boundary, &target_boundary));
             }
@@ -462,7 +467,7 @@ mod tests {
     #[test]
     fn embedding_action_preserves_maps_and_closedness() {
         let square = Arc::new(square());
-        let (_, embedding) = boundary(Sign::Input, 0, &square);
+        let (_, embedding) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
         let symmetry = SignedPermutation::try_new(vec![
             DirectionImage {
                 direction: 1,
@@ -496,8 +501,8 @@ mod tests {
     #[test]
     fn embedding_action_respects_composition() {
         let square = Arc::new(square());
-        let (edge, edge_into_square) = boundary(Sign::Input, 0, &square);
-        let (_, point_into_edge) = boundary(Sign::Output, 1, &edge);
+        let (edge, edge_into_square) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
+        let (_, point_into_edge) = boundary(BoundaryMode::Plain, Sign::Output, 1, &edge);
         let point_into_square = Embedding::compose(&point_into_edge, &edge_into_square);
         let symmetry = SignedPermutation::from_permutation(vec![1, 0]).unwrap();
 
@@ -523,7 +528,7 @@ mod tests {
     #[test]
     fn inverse_symmetry_restores_an_embedding() {
         let square = Arc::new(square());
-        let (_, embedding) = boundary(Sign::Input, 1, &square);
+        let (_, embedding) = boundary(BoundaryMode::Plain, Sign::Input, 1, &square);
         let symmetry = SignedPermutation::try_new(vec![
             DirectionImage {
                 direction: 1,

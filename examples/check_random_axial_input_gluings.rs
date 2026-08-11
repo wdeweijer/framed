@@ -4,8 +4,8 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-use ofposets::poset::boundary_hat;
 use ofposets::pushout::pushout;
+use ofposets::{BoundaryMode, boundary};
 use ofposets::{
     Embedding, FramedPoset, RandomFramedPosetGenerator, Renderer, Sign, embedding_to_dot,
     isomorphisms, normalize, to_dot,
@@ -91,7 +91,8 @@ fn main() -> io::Result<()> {
         let input = &class.inputs[pair.input];
         let first = &shapes[output.shape];
         let from_canonical = input.to_canonical.inverse_isomorphism();
-        let (_, input_into_first) = boundary_hat(Sign::Input, class.direction, first);
+        let (_, input_into_first) =
+            boundary(BoundaryMode::Hat, Sign::Input, class.direction, first);
         let mut pair_failed = false;
 
         for (isomorphism, automorphism) in class.automorphisms.iter().enumerate() {
@@ -100,7 +101,8 @@ fn main() -> io::Result<()> {
             let into_second = Embedding::compose(&boundary_isomorphism, &input.into_shape);
             let pasted = pushout(&output.into_shape, &into_second);
 
-            let (_, actual) = boundary_hat(Sign::Input, class.direction, &pasted.tip);
+            let (_, actual) =
+                boundary(BoundaryMode::Hat, Sign::Input, class.direction, &pasted.tip);
             let expected = Embedding::compose(&input_into_first, &pasted.inl);
             let holds = Embedding::equal(&actual, &expected);
 
@@ -173,7 +175,7 @@ fn build_boundary_index(shapes: &[Arc<FramedPoset>]) -> io::Result<BoundaryIndex
     for (shape, poset) in shapes.iter().enumerate() {
         for direction in 0..2 {
             for sign in [Sign::Input, Sign::Output] {
-                let (boundary, into_shape) = boundary_hat(sign, direction, poset);
+                let (boundary, into_shape) = boundary(BoundaryMode::Hat, sign, direction, poset);
                 let canonical = Arc::new(normalize(&boundary));
                 let class = *class_indices
                     .entry((direction, Arc::clone(&canonical)))
@@ -310,8 +312,8 @@ fn write_failure(
     let glued_boundary_into_second = Embedding::compose(&boundary_isomorphism, &input.into_shape);
     let pasted = pushout(&output.into_shape, &glued_boundary_into_second);
 
-    let (_, actual) = boundary_hat(Sign::Input, class.direction, &pasted.tip);
-    let (_, input_into_first) = boundary_hat(Sign::Input, class.direction, first);
+    let (_, actual) = boundary(BoundaryMode::Hat, Sign::Input, class.direction, &pasted.tip);
+    let (_, input_into_first) = boundary(BoundaryMode::Hat, Sign::Input, class.direction, first);
     let expected = Embedding::compose(&input_into_first, &pasted.inl);
     debug_assert!(!Embedding::equal(&actual, &expected));
 

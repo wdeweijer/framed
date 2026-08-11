@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use ofposets::poset::boundary_hat;
 use ofposets::pushout::{Pushout, pushout};
+use ofposets::{BoundaryMode, CubularityMode, boundary};
 use ofposets::{
     DirectionImage, Embedding, FramedPoset, Renderer, Sign, SignedPermutation, embedding_to_dot,
-    is_strongly_cubular, isomorphisms, normalize, to_dot, transform,
+    is_cubular, isomorphisms, normalize, to_dot, transform,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{Rng, SeedableRng, TryRngCore};
@@ -190,7 +190,7 @@ fn exhaustive_statistics(boundary_index: &BoundaryIndex) -> io::Result<()> {
                         Embedding::compose(&through_automorphism, &from_canonical);
                     let into_second = Embedding::compose(&boundary_isomorphism, &output.into_shape);
                     let glued = pushout(&input.into_shape, &into_second);
-                    let failed = !is_strongly_cubular(&glued.tip);
+                    let failed = !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &glued.tip);
 
                     total.gluings += 1;
                     by_direction[class.direction].gluings += 1;
@@ -325,7 +325,7 @@ fn load_and_expand_dataset(
                 ),
             ));
         }
-        if !is_strongly_cubular(&normal) {
+        if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &normal) {
             return Err(invalid_line(
                 path,
                 line_number,
@@ -394,7 +394,7 @@ fn normalized_symmetry_images(
         let transformed = transform(shape, symmetry)
             .map_err(|error| format!("could not apply {symmetry:?}: {error}"))?;
         let image = Arc::new(normalize(&transformed));
-        if !is_strongly_cubular(&image) {
+        if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &image) {
             return Err(format!("{symmetry:?} produced a non-cubular image"));
         }
         if images
@@ -426,7 +426,7 @@ fn build_boundary_index(shapes: &[Arc<FramedPoset>]) -> io::Result<BoundaryIndex
     for (shape_id, shape) in shapes.iter().enumerate() {
         for direction in 0..2 {
             for sign in [Sign::Input, Sign::Output] {
-                let (boundary, into_shape) = boundary_hat(sign, direction, shape);
+                let (boundary, into_shape) = boundary(BoundaryMode::Hat, sign, direction, shape);
                 let canonical = Arc::new(normalize(&boundary));
                 let class = *class_indices
                     .entry((direction, Arc::clone(&canonical)))
@@ -565,7 +565,7 @@ fn search(
                 .checked_add(1)
                 .ok_or_else(|| invalid_data("pushout counter overflow"))?;
 
-            if !is_strongly_cubular(&glued.tip) {
+            if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &glued.tip) {
                 return Ok(Some(GluingFailure {
                     pair_number: pair_count,
                     key: sampled.key,

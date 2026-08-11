@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use ofposets::poset::boundary_hat;
+use ofposets::{BoundaryMode, boundary};
 use ofposets::{
     DirectionImage, Embedding, FramedPoset, Sign, SignedPermutation, normalize, transform,
 };
@@ -435,21 +435,27 @@ fn two_dimensional_symmetries() -> Vec<SignedPermutation> {
 
 fn cubularity_failure(shape: &Arc<FramedPoset>) -> Option<(Sign, Sign)> {
     SIGN_PAIRS.into_iter().find(|&(sign_0, sign_1)| {
-        let zero_then_one = iterated_boundary_hat(shape, sign_0, 0, sign_1, 1);
-        let one_then_zero = iterated_boundary_hat(shape, sign_1, 1, sign_0, 0);
+        let zero_then_one = iterated_hat_boundary(shape, sign_0, 0, sign_1, 1);
+        let one_then_zero = iterated_hat_boundary(shape, sign_1, 1, sign_0, 0);
         !Embedding::equal(&zero_then_one, &one_then_zero)
     })
 }
 
-fn iterated_boundary_hat(
+fn iterated_hat_boundary(
     shape: &Arc<FramedPoset>,
     first_sign: Sign,
     first_direction: usize,
     second_sign: Sign,
     second_direction: usize,
 ) -> Embedding {
-    let (first_boundary, first_embedding) = boundary_hat(first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary_hat(second_sign, second_direction, &first_boundary);
+    let (first_boundary, first_embedding) =
+        boundary(BoundaryMode::Hat, first_sign, first_direction, shape);
+    let (_, second_embedding) = boundary(
+        BoundaryMode::Hat,
+        second_sign,
+        second_direction,
+        &first_boundary,
+    );
     Embedding::compose(&second_embedding, &first_embedding)
 }
 

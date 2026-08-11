@@ -428,7 +428,7 @@ fn image_edges(embedding: &Embedding) -> HashSet<(Sign, usize, usize, usize, usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::poset::boundary;
+    use crate::poset::{BoundaryMode, boundary};
 
     fn point() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::point())
@@ -642,8 +642,8 @@ mod tests {
     #[test]
     fn intersection_returns_maps_to_both_arguments() {
         let cod = square();
-        let (_, left) = boundary(Sign::Input, 0, &cod);
-        let (_, bottom) = boundary(Sign::Input, 1, &cod);
+        let (_, left) = boundary(BoundaryMode::Plain, Sign::Input, 0, &cod);
+        let (_, bottom) = boundary(BoundaryMode::Plain, Sign::Input, 1, &cod);
 
         let intersection = Embedding::intersection(&left, &bottom);
 
@@ -666,8 +666,8 @@ mod tests {
     #[test]
     fn union_returns_maps_from_both_arguments() {
         let cod = square();
-        let (_, left) = boundary(Sign::Input, 0, &cod);
-        let (_, bottom) = boundary(Sign::Input, 1, &cod);
+        let (_, left) = boundary(BoundaryMode::Plain, Sign::Input, 0, &cod);
+        let (_, bottom) = boundary(BoundaryMode::Plain, Sign::Input, 1, &cod);
 
         let union = Embedding::union(&left, &bottom);
 

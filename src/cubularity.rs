@@ -3,29 +3,30 @@
 use std::sync::Arc;
 
 use crate::embedding::Embedding;
-use crate::poset::{FramedPoset, Sign, boundary_hat};
+use crate::poset::{BoundaryMode, FramedPoset, Sign, boundary};
 
-/// True when every ordering of distinct directional boundaries agrees.
-///
-/// Equivalently, boundary operators commute in every iterated boundary of
-/// `shape`. In particular, every boundary of a cubular poset is cubular.
-pub fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
-    check_all_boundary_states(shape, Check::Cubular)
-}
-
-/// True when every pair of boundaries intersects strongly at every depth.
-///
-/// In each iterated boundary `B`, this requires both orders of two further
-/// boundaries to equal their intersection in `B`. Strong cubularity therefore
-/// implies [`is_cubular`].
-pub fn is_strongly_cubular(shape: &Arc<FramedPoset>) -> bool {
-    check_all_boundary_states(shape, Check::Strong)
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Check {
-    Cubular,
+/// Strength of the cubularity condition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CubularityMode {
+    /// Require distinct directional boundary operators to commute.
+    Regular,
+    /// Additionally require each iterated boundary to equal the corresponding
+    /// intersection of direct boundaries.
     Strong,
+}
+
+/// Test cubularity using the selected boundary definition and strength.
+///
+/// Regular cubularity requires every ordering of distinct directional
+/// boundaries to agree. Strong cubularity requires, at every iterated boundary,
+/// both orders of two further boundaries to equal their intersection. Thus
+/// strong cubularity implies regular cubularity for the same `boundary_mode`.
+pub fn is_cubular(
+    boundary_mode: BoundaryMode,
+    cubularity_mode: CubularityMode,
+    shape: &Arc<FramedPoset>,
+) -> bool {
+    check_all_boundary_states(shape, boundary_mode, cubularity_mode)
 }
 
 struct Boundary {
@@ -33,15 +34,30 @@ struct Boundary {
     into_parent: Embedding,
 }
 
-fn check_all_boundary_states(shape: &Arc<FramedPoset>, check: Check) -> bool {
+#[derive(Debug, Clone, Copy)]
+struct CheckContext {
+    boundary_mode: BoundaryMode,
+    cubularity_mode: CubularityMode,
+    trace: bool,
+}
+
+fn check_all_boundary_states(
+    shape: &Arc<FramedPoset>,
+    boundary_mode: BoundaryMode,
+    cubularity_mode: CubularityMode,
+) -> bool {
     let directions = shape.active_directions();
-    let trace = std::env::var_os("OFP_CUBULARITY_TRACE").is_some();
+    let context = CheckContext {
+        boundary_mode,
+        cubularity_mode,
+        trace: std::env::var_os("OFP_CUBULARITY_TRACE").is_some(),
+    };
     let mut selected = vec![false; directions.len()];
     let mut boundary_word = Vec::new();
 
-    if trace {
+    if context.trace {
         eprintln!(
-            "[cubularity] start {check:?}: directions={directions:?}, cells={:?}",
+            "[cubularity] start {cubularity_mode:?} with {boundary_mode:?} boundaries: directions={directions:?}, cells={:?}",
             shape.sizes()
         );
     }
@@ -52,12 +68,13 @@ fn check_all_boundary_states(shape: &Arc<FramedPoset>, check: Check) -> bool {
         &mut selected,
         0,
         &mut boundary_word,
-        check,
-        trace,
+        context,
     );
 
-    if trace {
-        eprintln!("[cubularity] finish {check:?}: {result}");
+    if context.trace {
+        eprintln!(
+            "[cubularity] finish {cubularity_mode:?} with {boundary_mode:?} boundaries: {result}"
+        );
     }
     result
 }
@@ -68,8 +85,7 @@ fn check_states(
     selected: &mut [bool],
     next: usize,
     boundary_word: &mut Vec<(Sign, usize)>,
-    check: Check,
-    trace: bool,
+    context: CheckContext,
 ) -> bool {
     if next == directions.len() {
         let remaining: Vec<usize> = directions
@@ -77,18 +93,18 @@ fn check_states(
             .zip(selected.iter())
             .filter_map(|(&direction, &is_selected)| (!is_selected).then_some(direction))
             .collect();
-        if trace {
+        if context.trace {
             eprintln!(
                 "[cubularity] state {}: cells={:?}, remaining={remaining:?}",
                 format_boundary_word(boundary_word),
                 shape.sizes()
             );
         }
-        return check_last_two(shape, &remaining, boundary_word, check, trace);
+        return check_last_two(shape, &remaining, boundary_word, context);
     }
 
     selected[next] = false;
-    if trace {
+    if context.trace {
         eprintln!(
             "[cubularity] {}leave direction {} available",
             "  ".repeat(boundary_word.len()),
@@ -101,24 +117,23 @@ fn check_states(
         selected,
         next + 1,
         boundary_word,
-        check,
-        trace,
+        context,
     ) {
         return false;
     }
 
     selected[next] = true;
     for sign in [Sign::Input, Sign::Output] {
-        if trace {
+        if context.trace {
             eprintln!(
                 "[cubularity] {}take {sign:?} boundary in direction {}",
                 "  ".repeat(boundary_word.len()),
                 directions[next]
             );
         }
-        let (boundary, _) = boundary_hat(sign, directions[next], shape);
+        let (boundary, _) = boundary(context.boundary_mode, sign, directions[next], shape);
         boundary_word.push((sign, directions[next]));
-        if trace {
+        if context.trace {
             eprintln!(
                 "[cubularity] {}reached {} with cells={:?}",
                 "  ".repeat(boundary_word.len()),
@@ -132,8 +147,7 @@ fn check_states(
             selected,
             next + 1,
             boundary_word,
-            check,
-            trace,
+            context,
         ) {
             boundary_word.pop();
             selected[next] = false;
@@ -149,11 +163,10 @@ fn check_last_two(
     shape: &Arc<FramedPoset>,
     directions: &[usize],
     boundary_word: &[(Sign, usize)],
-    check: Check,
-    trace: bool,
+    context: CheckContext,
 ) -> bool {
     if directions.len() < 2 {
-        if trace {
+        if context.trace {
             eprintln!(
                 "[cubularity]   no last-two check needed for {}",
                 format_boundary_word(boundary_word)
@@ -166,7 +179,7 @@ fn check_last_two(
         .iter()
         .map(|&direction| {
             [Sign::Input, Sign::Output].map(|sign| {
-                let (domain, into_parent) = boundary_hat(sign, direction, shape);
+                let (domain, into_parent) = boundary(context.boundary_mode, sign, direction, shape);
                 Boundary {
                     domain,
                     into_parent,
@@ -175,7 +188,7 @@ fn check_last_two(
         })
         .collect();
 
-    if trace {
+    if context.trace {
         for (index, &direction) in directions.iter().enumerate() {
             eprintln!(
                 "[cubularity]   direct boundaries at {}: Input={:?}, Output={:?}",
@@ -194,15 +207,23 @@ fn check_last_two(
                     let beta_sign = [Sign::Input, Sign::Output][beta];
                     let alpha_boundary = &boundaries[left][alpha];
                     let beta_boundary = &boundaries[right][beta];
-                    let alpha_after_beta =
-                        boundary_after(beta_boundary, alpha_sign, directions[left]);
-                    let beta_after_alpha =
-                        boundary_after(alpha_boundary, beta_sign, directions[right]);
+                    let alpha_after_beta = boundary_after(
+                        context.boundary_mode,
+                        beta_boundary,
+                        alpha_sign,
+                        directions[left],
+                    );
+                    let beta_after_alpha = boundary_after(
+                        context.boundary_mode,
+                        alpha_boundary,
+                        beta_sign,
+                        directions[right],
+                    );
 
-                    let equal = match check {
-                        Check::Cubular => {
+                    let equal = match context.cubularity_mode {
+                        CubularityMode::Regular => {
                             let equal = Embedding::equal(&alpha_after_beta, &beta_after_alpha);
-                            if trace {
+                            if context.trace {
                                 eprintln!(
                                     "[cubularity]   commute ({alpha_sign:?}, {}) after \
                                      ({beta_sign:?}, {}) with ({beta_sign:?}, {}) after \
@@ -217,7 +238,7 @@ fn check_last_two(
                             }
                             equal
                         }
-                        Check::Strong => {
+                        CubularityMode::Strong => {
                             let intersection = Embedding::intersection(
                                 &alpha_boundary.into_parent,
                                 &beta_boundary.into_parent,
@@ -225,7 +246,7 @@ fn check_last_two(
                             .into_codomain;
                             let alpha_equal = Embedding::equal(&alpha_after_beta, &intersection);
                             let beta_equal = Embedding::equal(&beta_after_alpha, &intersection);
-                            if trace {
+                            if context.trace {
                                 eprintln!(
                                     "[cubularity]   strong ({alpha_sign:?}, {}) / \
                                      ({beta_sign:?}, {}): first={alpha_equal}, \
@@ -241,7 +262,7 @@ fn check_last_two(
                         }
                     };
                     if !equal {
-                        if trace {
+                        if context.trace {
                             eprintln!(
                                 "[cubularity]   FAILED at state {}",
                                 format_boundary_word(boundary_word)
@@ -256,8 +277,14 @@ fn check_last_two(
     true
 }
 
-fn boundary_after(first: &Boundary, second_sign: Sign, second_direction: usize) -> Embedding {
-    let (_, second_into_first) = boundary_hat(second_sign, second_direction, &first.domain);
+fn boundary_after(
+    boundary_mode: BoundaryMode,
+    first: &Boundary,
+    second_sign: Sign,
+    second_direction: usize,
+) -> Embedding {
+    let (_, second_into_first) =
+        boundary(boundary_mode, second_sign, second_direction, &first.domain);
     Embedding::compose(&second_into_first, &first.into_parent)
 }
 
@@ -419,21 +446,40 @@ mod tests {
 
     fn is_top_level_cubular(shape: &Arc<FramedPoset>) -> bool {
         let directions = shape.active_directions();
-        check_last_two(shape, &directions, &[], Check::Cubular, false)
+        check_last_two(
+            shape,
+            &directions,
+            &[],
+            CheckContext {
+                boundary_mode: BoundaryMode::Hat,
+                cubularity_mode: CubularityMode::Regular,
+                trace: false,
+            },
+        )
     }
 
     #[test]
     fn standard_square_is_strongly_cubular() {
         let shape = square();
-        assert!(is_strongly_cubular(&shape));
-        assert!(is_cubular(&shape));
+        for boundary_mode in [BoundaryMode::Plain, BoundaryMode::Hat] {
+            assert!(is_cubular(boundary_mode, CubularityMode::Strong, &shape));
+            assert!(is_cubular(boundary_mode, CubularityMode::Regular, &shape));
+        }
     }
 
     #[test]
     fn strong_cubularity_is_stricter_than_cubularity() {
         let shape = weakly_but_not_strongly_cubular();
-        assert!(is_cubular(&shape));
-        assert!(!is_strongly_cubular(&shape));
+        assert!(is_cubular(
+            BoundaryMode::Hat,
+            CubularityMode::Regular,
+            &shape
+        ));
+        assert!(!is_cubular(
+            BoundaryMode::Hat,
+            CubularityMode::Strong,
+            &shape
+        ));
     }
 
     #[test]
@@ -443,7 +489,9 @@ mod tests {
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
         ));
-        assert!(is_strongly_cubular(&arrow));
+        for boundary_mode in [BoundaryMode::Plain, BoundaryMode::Hat] {
+            assert!(is_cubular(boundary_mode, CubularityMode::Strong, &arrow));
+        }
     }
 
     #[test]
@@ -453,26 +501,41 @@ mod tests {
             weakly_but_not_strongly_cubular(),
             non_cubular_two_dimensional(),
         ] {
-            assert_eq!(is_cubular(&shape), is_top_level_cubular(&shape));
+            assert_eq!(
+                is_cubular(BoundaryMode::Hat, CubularityMode::Regular, &shape),
+                is_top_level_cubular(&shape)
+            );
         }
     }
 
     #[test]
     fn standard_three_cube_and_all_its_boundaries_are_strongly_cubular() {
         let cube = cube(3);
-        assert!(is_strongly_cubular(&cube));
+        assert!(is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &cube));
 
         for direction in 0..3 {
             for sign in [Sign::Input, Sign::Output] {
-                let (boundary, _) = boundary_hat(sign, direction, &cube);
-                assert!(is_strongly_cubular(&boundary));
-                assert!(is_cubular(&boundary));
+                let (boundary, _) = boundary(BoundaryMode::Hat, sign, direction, &cube);
+                assert!(is_cubular(
+                    BoundaryMode::Hat,
+                    CubularityMode::Strong,
+                    &boundary
+                ));
+                assert!(is_cubular(
+                    BoundaryMode::Hat,
+                    CubularityMode::Regular,
+                    &boundary
+                ));
             }
         }
     }
 
     #[test]
     fn standard_three_cube_is_cubular() {
-        assert!(is_cubular(&cube(3)));
+        assert!(is_cubular(
+            BoundaryMode::Hat,
+            CubularityMode::Regular,
+            &cube(3)
+        ));
     }
 }

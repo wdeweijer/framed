@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use ofposets::{
-    Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Renderer, Sign,
-    boundary, embedding_to_dot, to_dot,
+    BoundaryMode, Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Renderer,
+    Sign, boundary, embedding_to_dot, to_dot,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
@@ -151,8 +151,8 @@ fn boundary_intersection_embeddings(
     sign_0: Sign,
     sign_1: Sign,
 ) -> (Embedding, Embedding) {
-    let (_, boundary_0) = boundary(sign_0, 0, shape);
-    let (_, boundary_1) = boundary(sign_1, 1, shape);
+    let (_, boundary_0) = boundary(BoundaryMode::Plain, sign_0, 0, shape);
+    let (_, boundary_1) = boundary(BoundaryMode::Plain, sign_1, 1, shape);
     let intersection = Embedding::intersection(&boundary_0, &boundary_1).into_codomain;
     let iterated = iterated_boundary(shape, sign_1, 1, sign_0, 0);
 
@@ -235,8 +235,14 @@ fn iterated_boundary(
     second_sign: Sign,
     second_direction: usize,
 ) -> Embedding {
-    let (first_boundary, first_embedding) = boundary(first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary(second_sign, second_direction, &first_boundary);
+    let (first_boundary, first_embedding) =
+        boundary(BoundaryMode::Plain, first_sign, first_direction, shape);
+    let (_, second_embedding) = boundary(
+        BoundaryMode::Plain,
+        second_sign,
+        second_direction,
+        &first_boundary,
+    );
     Embedding::compose(&second_embedding, &first_embedding)
 }
 

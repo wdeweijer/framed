@@ -3,7 +3,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use ofposets::{Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, to_dot};
+use ofposets::{
+    BoundaryMode, Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, to_dot,
+};
 
 fn main() -> std::io::Result<()> {
     let output_dir = Path::new("visualizations");
@@ -34,14 +36,15 @@ fn main() -> std::io::Result<()> {
     }
 
     let three_cube = Arc::new(n_cube(3));
-    let (minus_0_boundary, minus_0_embedding) = boundary(Sign::Input, 0, &three_cube);
+    let (minus_0_boundary, minus_0_embedding) =
+        boundary(BoundaryMode::Plain, Sign::Input, 0, &three_cube);
     fs::write(
         output_dir.join("n_cube_3_boundary_minus_0_embedding_compass_spring.dot"),
         embedding_to_dot(&minus_0_embedding, Renderer::CompassSpring),
     )?;
 
     let (minus_0_minus_1_domain, minus_0_minus_1_embedding) =
-        boundary(Sign::Input, 1, &minus_0_boundary);
+        boundary(BoundaryMode::Plain, Sign::Input, 1, &minus_0_boundary);
     let minus_0_minus_1_composite =
         Embedding::compose(&minus_0_minus_1_embedding, &minus_0_embedding);
     fs::write(
@@ -49,7 +52,8 @@ fn main() -> std::io::Result<()> {
         embedding_to_dot(&minus_0_minus_1_composite, Renderer::CompassSpring),
     )?;
 
-    let (minus_1_boundary, minus_1_embedding) = boundary(Sign::Input, 1, &three_cube);
+    let (minus_1_boundary, minus_1_embedding) =
+        boundary(BoundaryMode::Plain, Sign::Input, 1, &three_cube);
     let minus_0_union_minus_1 = Embedding::union(&minus_0_embedding, &minus_1_embedding);
     let minus_0_intersection_minus_1 =
         Embedding::intersection(&minus_0_embedding, &minus_1_embedding);
@@ -62,7 +66,7 @@ fn main() -> std::io::Result<()> {
     )?;
 
     let (minus_1_minus_0_domain, minus_1_minus_0_embedding) =
-        boundary(Sign::Input, 0, &minus_1_boundary);
+        boundary(BoundaryMode::Plain, Sign::Input, 0, &minus_1_boundary);
     let minus_1_minus_0_composite =
         Embedding::compose(&minus_1_minus_0_embedding, &minus_1_embedding);
     let intersection_into_union_via_minus_0 = Embedding::compose(
@@ -102,8 +106,8 @@ fn main() -> std::io::Result<()> {
     )?;
 
     let four_cube = Arc::new(n_cube(4));
-    let (_, four_minus_0_embedding) = boundary(Sign::Input, 0, &four_cube);
-    let (_, four_minus_1_embedding) = boundary(Sign::Input, 1, &four_cube);
+    let (_, four_minus_0_embedding) = boundary(BoundaryMode::Plain, Sign::Input, 0, &four_cube);
+    let (_, four_minus_1_embedding) = boundary(BoundaryMode::Plain, Sign::Input, 1, &four_cube);
     let four_minus_0_union_minus_1 =
         Embedding::union(&four_minus_0_embedding, &four_minus_1_embedding);
     let four_minus_0_intersection_minus_1 =
@@ -148,7 +152,7 @@ fn write_boundary(
     direction: usize,
     name: &str,
 ) -> std::io::Result<()> {
-    let (domain, embedding) = boundary(sign, direction, shape);
+    let (domain, embedding) = boundary(BoundaryMode::Plain, sign, direction, shape);
     fs::write(
         output_dir.join(format!("two_direction_square_boundary_{}.dot", name)),
         to_dot(&domain, Renderer::Ranked),

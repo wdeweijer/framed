@@ -7,16 +7,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ofposets::poset::boundary_hat;
 use ofposets::pushout::{Pushout, pushout};
 use ofposets::{
-    Embedding, FramedPoset, RandomFramedPosetGenerator, Renderer, Sign, embedding_to_dot,
-    is_cubular, is_strongly_cubular, isomorphisms, normalize, to_dot,
+    BoundaryMode, CubularityMode, Embedding, FramedPoset, RandomFramedPosetGenerator, Renderer,
+    Sign, boundary, embedding_to_dot, is_cubular, isomorphisms, normalize, to_dot,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{Rng, SeedableRng, TryRngCore};
 
-const DIRECTION_COUNT: usize = 3;
 const MAX_ISOMORPHISMS: usize = 10;
 const GENERATION_BATCH_SIZE: usize = 4_096;
 const REPORT_INTERVAL: Duration = Duration::from_secs(5);
@@ -25,10 +23,12 @@ const FAILURE_ROOT: &str = "visualizations/random_3d_boundary_gluing_failures";
 #[derive(Debug, Clone, Copy)]
 struct Options {
     cell_count: usize,
+    dimension: usize,
     shape_count: usize,
     pair_count: usize,
     worker_count: usize,
-    require_strong: bool,
+    cubularity_mode: CubularityMode,
+    boundary_mode: BoundaryMode,
     seed: u64,
 }
 
@@ -75,6 +75,12 @@ struct EquationCheck {
     expected_parts: Option<[Embedding; 2]>,
 }
 
+#[derive(Clone, Copy)]
+struct PastedSide<'a> {
+    shape: &'a Arc<FramedPoset>,
+    into_pasted: &'a Embedding,
+}
+
 struct FailureWitness {
     pair: usize,
     gluing_direction: usize,
@@ -103,16 +109,18 @@ struct Statistics {
 
 fn main() -> io::Result<()> {
     let options = parse_options()?;
-    let generator = RandomFramedPosetGenerator::new(DIRECTION_COUNT, options.cell_count);
+    let generator = RandomFramedPosetGenerator::new(options.dimension, options.cell_count);
     println!(
-        "generating {} {}cubular {}-cell 3D OFPs on {} threads (seed {:#018x})",
+        "generating {} {}cubular {}-cell {}D OFPs with {:?} boundaries on {} threads (seed {:#018x})",
         options.shape_count,
-        if options.require_strong {
+        if options.cubularity_mode == CubularityMode::Strong {
             "strongly "
         } else {
             ""
         },
         options.cell_count,
+        options.dimension,
+        options.boundary_mode,
         options.worker_count,
         options.seed
     );
@@ -123,7 +131,8 @@ fn main() -> io::Result<()> {
         shapes.len()
     );
 
-    let mut boundary_index = build_boundary_index(&shapes)?;
+    let mut boundary_index =
+        build_boundary_index(&shapes, options.dimension, options.boundary_mode)?;
     prepare_automorphisms(&mut boundary_index)?;
     println!(
         "indexed {} compatible boundary classes containing {} ordered pairs",
@@ -136,8 +145,14 @@ fn main() -> io::Result<()> {
         .min(usize::try_from(boundary_index.total_pairs).unwrap_or(options.pair_count));
     let mut rng = SmallRng::seed_from_u64(derived_seed(options.seed, u64::MAX));
     let pairs = sample_pairs(&boundary_index, sample_count, &mut rng);
-    let (statistics, first_failure) = check_pairs(&shapes, &boundary_index, &pairs);
-    print_statistics(&statistics);
+    let (statistics, first_failure) = check_pairs(
+        &shapes,
+        &boundary_index,
+        &pairs,
+        options.dimension,
+        options.boundary_mode,
+    );
+    print_statistics(&statistics, options.dimension);
 
     if let Some(failure) = first_failure {
         let output_dir = write_failure(options.seed, &failure)?;
@@ -152,7 +167,10 @@ fn main() -> io::Result<()> {
         );
         println!("wrote failure artifacts to {}", output_dir.display());
     } else {
-        println!("all sampled axial and transverse hat-boundary equations held");
+        println!(
+            "all sampled axial and transverse {:?}-boundary equations held",
+            options.boundary_mode
+        );
     }
 
     Ok(())
@@ -161,10 +179,12 @@ fn main() -> io::Result<()> {
 fn parse_options() -> io::Result<Options> {
     let mut options = Options {
         cell_count: 8,
+        dimension: 3,
         shape_count: 1_000,
         pair_count: 1_000,
         worker_count: thread::available_parallelism()?.get(),
-        require_strong: false,
+        cubularity_mode: CubularityMode::Regular,
+        boundary_mode: BoundaryMode::Hat,
         seed: OsRng.try_next_u64().map_err(io::Error::other)?,
     };
     let mut arguments = env::args().skip(1);
@@ -172,6 +192,7 @@ fn parse_options() -> io::Result<Options> {
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--cells" => options.cell_count = parse_usize_argument(&mut arguments, "--cells")?,
+            "--dim" => options.dimension = parse_usize_argument(&mut arguments, "--dim")?,
             "--shapes" => options.shape_count = parse_usize_argument(&mut arguments, "--shapes")?,
             "--pairs" => options.pair_count = parse_usize_argument(&mut arguments, "--pairs")?,
             "--threads" => {
@@ -183,13 +204,23 @@ fn parse_options() -> io::Result<Options> {
                 })?;
                 options.seed = parse_seed(&value)?;
             }
-            "--strong" => options.require_strong = true,
+            "--boundary" => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| invalid_input("--boundary requires plain or hat"))?;
+                options.boundary_mode = match value.as_str() {
+                    "plain" => BoundaryMode::Plain,
+                    "hat" => BoundaryMode::Hat,
+                    _ => return Err(invalid_input("--boundary requires plain or hat")),
+                };
+            }
+            "--strong" => options.cubularity_mode = CubularityMode::Strong,
             "--help" | "-h" => {
                 println!(
                     "Usage: cargo run --release --example \
                      check_random_3d_boundary_gluing_formulas -- \
                      [--cells N] [--shapes N] [--pairs N] \
-                     [--threads N] [--seed N] [--strong]"
+                     [--threads N] [--seed N] [--boundary plain|hat] [--strong]"
                 );
                 std::process::exit(0);
             }
@@ -197,8 +228,18 @@ fn parse_options() -> io::Result<Options> {
         }
     }
 
-    if options.cell_count < 8 {
-        return Err(invalid_input("--cells must be at least 8"));
+    if options.dimension >= usize::BITS as usize {
+        return Err(invalid_input(format!(
+            "--dim must be smaller than {}",
+            usize::BITS
+        )));
+    }
+    let minimum_cell_count = 1usize << options.dimension;
+    if options.cell_count < minimum_cell_count {
+        return Err(invalid_input(format!(
+            "--cells must be at least {minimum_cell_count} for dimension {}",
+            options.dimension
+        )));
     }
     if options.shape_count == 0 {
         return Err(invalid_input("--shapes must be positive"));
@@ -289,11 +330,8 @@ fn generate_candidate_batch(
                             .expect("candidate ticket must fit into a u64 seed");
                         let mut rng = SmallRng::seed_from_u64(derived_seed(options.seed, stream));
                         let shape = Arc::new(generator.generate(&mut rng));
-                        let is_accepted = if options.require_strong {
-                            is_strongly_cubular(&shape)
-                        } else {
-                            is_cubular(&shape)
-                        };
+                        let is_accepted =
+                            is_cubular(options.boundary_mode, options.cubularity_mode, &shape);
                         if is_accepted {
                             accepted.push((ticket, shape));
                         }
@@ -317,15 +355,19 @@ fn derived_seed(seed: u64, stream: u64) -> u64 {
     value ^ (value >> 31)
 }
 
-fn build_boundary_index(shapes: &[Arc<FramedPoset>]) -> io::Result<BoundaryIndex> {
+fn build_boundary_index(
+    shapes: &[Arc<FramedPoset>],
+    direction_count: usize,
+    boundary_mode: BoundaryMode,
+) -> io::Result<BoundaryIndex> {
     let mut classes = Vec::<BoundaryClass>::new();
     let mut class_indices = HashMap::<(usize, Arc<FramedPoset>), usize>::new();
     let mut transports = HashMap::<Arc<FramedPoset>, Embedding>::new();
 
     for (shape, poset) in shapes.iter().enumerate() {
-        for direction in 0..DIRECTION_COUNT {
+        for direction in 0..direction_count {
             for sign in [Sign::Input, Sign::Output] {
-                let (boundary, into_shape) = boundary_hat(sign, direction, poset);
+                let (boundary, into_shape) = boundary(boundary_mode, sign, direction, poset);
                 let canonical = Arc::new(normalize(&boundary));
                 let class = *class_indices
                     .entry((direction, Arc::clone(&canonical)))
@@ -368,9 +410,9 @@ fn build_boundary_index(shapes: &[Arc<FramedPoset>]) -> io::Result<BoundaryIndex
         cumulative_pairs.push(total_pairs);
     }
     if total_pairs == 0 {
-        return Err(invalid_data(
-            "generated shapes have no compatible input/output hat-boundary pairs",
-        ));
+        return Err(invalid_data(format!(
+            "generated shapes have no compatible input/output {boundary_mode:?}-boundary pairs"
+        )));
     }
 
     Ok(BoundaryIndex {
@@ -448,6 +490,8 @@ fn check_pairs(
     shapes: &[Arc<FramedPoset>],
     index: &BoundaryIndex,
     pairs: &[SampledPair],
+    direction_count: usize,
+    boundary_mode: BoundaryMode,
 ) -> (Statistics, Option<FailureWitness>) {
     let mut statistics = Statistics::default();
     let mut first_failure = None;
@@ -461,6 +505,7 @@ fn check_pairs(
         let from_canonical = input.to_canonical.inverse_isomorphism();
         statistics.pairs += 1;
         statistics.record_axial_boundary_intersection(axial_boundary_intersection_dimension(
+            boundary_mode,
             first,
             class.direction,
             &output.into_shape,
@@ -472,7 +517,14 @@ fn check_pairs(
             let first_output_into_second =
                 Embedding::compose(&boundary_isomorphism, &input.into_shape);
             let pasted = pushout(&output.into_shape, &first_output_into_second);
-            let checks = check_formulas(first, second, class.direction, &pasted);
+            let checks = check_formulas(
+                boundary_mode,
+                direction_count,
+                first,
+                second,
+                class.direction,
+                &pasted,
+            );
             let failed = checks.iter().any(|check| !check.holds);
 
             statistics.record(&checks);
@@ -534,11 +586,12 @@ impl Statistics {
 }
 
 fn axial_boundary_intersection_dimension(
+    boundary_mode: BoundaryMode,
     first: &Arc<FramedPoset>,
     direction: usize,
     output_boundary: &Embedding,
 ) -> Option<usize> {
-    let (_, input_boundary) = boundary_hat(Sign::Input, direction, first);
+    let (_, input_boundary) = boundary(boundary_mode, Sign::Input, direction, first);
     debug_assert!(input_boundary.is_closed());
     debug_assert!(output_boundary.is_closed());
     let intersection = Embedding::intersection(&input_boundary, output_boundary).into_codomain;
@@ -547,40 +600,49 @@ fn axial_boundary_intersection_dimension(
 }
 
 fn check_formulas(
+    boundary_mode: BoundaryMode,
+    direction_count: usize,
     first: &Arc<FramedPoset>,
     second: &Arc<FramedPoset>,
     gluing_direction: usize,
     pasted: &Pushout,
 ) -> Vec<EquationCheck> {
-    let mut checks = Vec::with_capacity(2 * DIRECTION_COUNT);
+    let mut checks = Vec::with_capacity(2 * direction_count);
+    let first = PastedSide {
+        shape: first,
+        into_pasted: &pasted.inl,
+    };
+    let second = PastedSide {
+        shape: second,
+        into_pasted: &pasted.inr,
+    };
     checks.push(compare_boundary_with_side(
+        boundary_mode,
         Sign::Input,
         gluing_direction,
         &pasted.tip,
         first,
-        &pasted.inl,
     ));
     checks.push(compare_boundary_with_side(
+        boundary_mode,
         Sign::Output,
         gluing_direction,
         &pasted.tip,
         second,
-        &pasted.inr,
     ));
 
-    for direction in 0..DIRECTION_COUNT {
+    for direction in 0..direction_count {
         if direction == gluing_direction {
             continue;
         }
         for sign in [Sign::Input, Sign::Output] {
             checks.push(compare_boundary_with_union(
+                boundary_mode,
                 sign,
                 direction,
                 &pasted.tip,
                 first,
-                &pasted.inl,
                 second,
-                &pasted.inr,
             ));
         }
     }
@@ -588,15 +650,15 @@ fn check_formulas(
 }
 
 fn compare_boundary_with_side(
+    boundary_mode: BoundaryMode,
     sign: Sign,
     direction: usize,
     pasted: &Arc<FramedPoset>,
-    side: &Arc<FramedPoset>,
-    side_into_pasted: &Embedding,
+    side: PastedSide<'_>,
 ) -> EquationCheck {
-    let (_, actual) = boundary_hat(sign, direction, pasted);
-    let (_, into_side) = boundary_hat(sign, direction, side);
-    let expected = Embedding::compose(&into_side, side_into_pasted);
+    let (_, actual) = boundary(boundary_mode, sign, direction, pasted);
+    let (_, into_side) = boundary(boundary_mode, sign, direction, side.shape);
+    let expected = Embedding::compose(&into_side, side.into_pasted);
     let holds = actual.is_closed() && expected.is_closed() && Embedding::equal(&actual, &expected);
 
     EquationCheck {
@@ -611,19 +673,18 @@ fn compare_boundary_with_side(
 }
 
 fn compare_boundary_with_union(
+    boundary_mode: BoundaryMode,
     sign: Sign,
     direction: usize,
     pasted: &Arc<FramedPoset>,
-    first: &Arc<FramedPoset>,
-    first_into_pasted: &Embedding,
-    second: &Arc<FramedPoset>,
-    second_into_pasted: &Embedding,
+    first: PastedSide<'_>,
+    second: PastedSide<'_>,
 ) -> EquationCheck {
-    let (_, actual) = boundary_hat(sign, direction, pasted);
-    let (_, first_boundary) = boundary_hat(sign, direction, first);
-    let (_, second_boundary) = boundary_hat(sign, direction, second);
-    let first_boundary = Embedding::compose(&first_boundary, first_into_pasted);
-    let second_boundary = Embedding::compose(&second_boundary, second_into_pasted);
+    let (_, actual) = boundary(boundary_mode, sign, direction, pasted);
+    let (_, first_boundary) = boundary(boundary_mode, sign, direction, first.shape);
+    let (_, second_boundary) = boundary(boundary_mode, sign, direction, second.shape);
+    let first_boundary = Embedding::compose(&first_boundary, first.into_pasted);
+    let second_boundary = Embedding::compose(&second_boundary, second.into_pasted);
 
     let expected = if first_boundary.is_closed() && second_boundary.is_closed() {
         Some(Embedding::union(&first_boundary, &second_boundary).into_codomain)
@@ -646,7 +707,7 @@ fn compare_boundary_with_union(
     }
 }
 
-fn print_statistics(statistics: &Statistics) {
+fn print_statistics(statistics: &Statistics, direction_count: usize) {
     println!("sampled compatible ordered pairs: {}", statistics.pairs);
     println!("individual gluings checked: {}", statistics.gluings);
     println!(
@@ -664,7 +725,7 @@ fn print_statistics(statistics: &Statistics) {
     }
     let transverse_checks = statistics
         .gluings
-        .saturating_mul((DIRECTION_COUNT - 1) as u128);
+        .saturating_mul(direction_count.saturating_sub(1) as u128);
     for sign in [Sign::Input, Sign::Output] {
         let failures = statistics.transverse_failures[sign_index(sign)];
         println!(
@@ -869,13 +930,15 @@ mod tests {
     fn parallel_generation_is_independent_of_worker_count() {
         let options = Options {
             cell_count: 8,
+            dimension: 3,
             shape_count: 1,
             pair_count: 1,
             worker_count: 1,
-            require_strong: false,
+            cubularity_mode: CubularityMode::Regular,
+            boundary_mode: BoundaryMode::Hat,
             seed: 1,
         };
-        let generator = RandomFramedPosetGenerator::new(DIRECTION_COUNT, options.cell_count);
+        let generator = RandomFramedPosetGenerator::new(options.dimension, options.cell_count);
         let serial = generate_candidate_batch(options, &generator, 0, 512);
         let parallel = generate_candidate_batch(
             Options {
@@ -902,11 +965,18 @@ mod tests {
         let first = standard_cube(3);
         let second = standard_cube(3);
 
-        for direction in 0..DIRECTION_COUNT {
-            let (output_domain, output_into_first) = boundary_hat(Sign::Output, direction, &first);
-            let (input_domain, input_into_second) = boundary_hat(Sign::Input, direction, &second);
+        for direction in 0..3 {
+            let (output_domain, output_into_first) =
+                boundary(BoundaryMode::Hat, Sign::Output, direction, &first);
+            let (input_domain, input_into_second) =
+                boundary(BoundaryMode::Hat, Sign::Input, direction, &second);
             assert_eq!(
-                axial_boundary_intersection_dimension(&first, direction, &output_into_first,),
+                axial_boundary_intersection_dimension(
+                    BoundaryMode::Hat,
+                    &first,
+                    direction,
+                    &output_into_first,
+                ),
                 None
             );
             let boundary_isomorphisms = isomorphisms(&output_domain, &input_domain);
@@ -915,7 +985,7 @@ mod tests {
             let output_into_second =
                 Embedding::compose(&boundary_isomorphisms[0], &input_into_second);
             let pasted = pushout(&output_into_first, &output_into_second);
-            let checks = check_formulas(&first, &second, direction, &pasted);
+            let checks = check_formulas(BoundaryMode::Hat, 3, &first, &second, direction, &pasted);
             let failures: Vec<_> = checks
                 .iter()
                 .filter(|check| !check.holds)

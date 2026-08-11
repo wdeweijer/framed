@@ -3,7 +3,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Instant;
 
-use ofposets::poset::boundary_hat;
+use ofposets::{BoundaryMode, boundary};
 use ofposets::{
     DirectionImage, Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, SignedPermutation,
     transform, transform_embedding,
@@ -49,7 +49,7 @@ fn check_equivariance(
         .into_iter()
         .flat_map(|sign| {
             (0..2).map(move |direction| {
-                let (_, embedding) = boundary_hat(sign, direction, shape);
+                let (_, embedding) = boundary(BoundaryMode::Hat, sign, direction, shape);
                 (sign, direction, embedding)
             })
         })
@@ -69,8 +69,12 @@ fn check_equivariance(
             };
             let transformed_boundary =
                 transform_embedding(source_boundary, symmetry).map_err(io::Error::other)?;
-            let (_, target_boundary) =
-                boundary_hat(target_sign, direction_image.direction, &transformed_shape);
+            let (_, target_boundary) = boundary(
+                BoundaryMode::Hat,
+                target_sign,
+                direction_image.direction,
+                &transformed_shape,
+            );
 
             if !Embedding::equal(&transformed_boundary, &target_boundary) {
                 return Err(equivariance_failure(

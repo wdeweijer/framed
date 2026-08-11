@@ -1,8 +1,10 @@
 use std::io;
 use std::sync::Arc;
 
-use ofposets::poset::boundary_hat;
-use ofposets::{Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Sign};
+use ofposets::{
+    BoundaryMode, Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Sign,
+    boundary,
+};
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
 
@@ -88,12 +90,18 @@ fn iterated_boundary_is_subset(
 ) -> bool {
     debug_assert_ne!(first_direction, second_direction);
 
-    let (first_boundary, first_into_shape) = boundary_hat(first_sign, first_direction, shape);
-    let (_, second_into_first) = boundary_hat(second_sign, second_direction, &first_boundary);
+    let (first_boundary, first_into_shape) =
+        boundary(BoundaryMode::Hat, first_sign, first_direction, shape);
+    let (_, second_into_first) = boundary(
+        BoundaryMode::Hat,
+        second_sign,
+        second_direction,
+        &first_boundary,
+    );
     let iterated_into_shape = Embedding::compose(&second_into_first, &first_into_shape);
     let iterated_subset = FramedPosetSubset::from_embedding(&iterated_into_shape);
 
-    let (_, second_into_shape) = boundary_hat(second_sign, second_direction, shape);
+    let (_, second_into_shape) = boundary(BoundaryMode::Hat, second_sign, second_direction, shape);
     let second_subset = FramedPosetSubset::from_embedding(&second_into_shape);
     iterated_subset.is_subset_of(&second_subset)
 }

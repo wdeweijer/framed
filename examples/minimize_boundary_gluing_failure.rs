@@ -5,8 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ofposets::poset::boundary_hat;
 use ofposets::pushout::{Pushout, pushout};
+use ofposets::{BoundaryMode, boundary};
 use ofposets::{
     Embedding, FramedPoset, FramedPosetSubset, Renderer, Sign, closure, embedding_to_dot,
     isomorphisms, normalize, to_dot,
@@ -168,7 +168,7 @@ fn prepare_candidates(
     shapes
         .into_iter()
         .map(|shape| {
-            let (_, boundary) = boundary_hat(sign, direction, &shape);
+            let (_, boundary) = boundary(BoundaryMode::Hat, sign, direction, &shape);
             Candidate {
                 cells: cell_count(&shape),
                 boundary_normal: Arc::new(normalize(&boundary.dom)),
@@ -250,8 +250,8 @@ fn minimize(
 
 fn cubularity_failure(shape: &Arc<FramedPoset>) -> Option<CubularityFailure> {
     SIGN_PAIRS.into_iter().find_map(|(sign_0, sign_1)| {
-        let zero_then_one = iterated_boundary_hat(shape, sign_0, 0, sign_1, 1);
-        let one_then_zero = iterated_boundary_hat(shape, sign_1, 1, sign_0, 0);
+        let zero_then_one = iterated_hat_boundary(shape, sign_0, 0, sign_1, 1);
+        let one_then_zero = iterated_hat_boundary(shape, sign_1, 1, sign_0, 0);
         (!Embedding::equal(&zero_then_one, &one_then_zero)).then_some(CubularityFailure {
             sign_0,
             sign_1,
@@ -265,15 +265,21 @@ fn is_hat_cubular(shape: &Arc<FramedPoset>) -> bool {
     cubularity_failure(shape).is_none()
 }
 
-fn iterated_boundary_hat(
+fn iterated_hat_boundary(
     shape: &Arc<FramedPoset>,
     first_sign: Sign,
     first_direction: usize,
     second_sign: Sign,
     second_direction: usize,
 ) -> Embedding {
-    let (first_boundary, first_embedding) = boundary_hat(first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary_hat(second_sign, second_direction, &first_boundary);
+    let (first_boundary, first_embedding) =
+        boundary(BoundaryMode::Hat, first_sign, first_direction, shape);
+    let (_, second_embedding) = boundary(
+        BoundaryMode::Hat,
+        second_sign,
+        second_direction,
+        &first_boundary,
+    );
     Embedding::compose(&second_embedding, &first_embedding)
 }
 

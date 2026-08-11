@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use ofposets::{Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, boundary, normalize};
+use ofposets::{
+    BoundaryMode, Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, boundary, normalize,
+};
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
 
@@ -174,8 +176,14 @@ fn iterated_boundary(
     second_sign: Sign,
     second_direction: usize,
 ) -> Embedding {
-    let (first_boundary, first_embedding) = boundary(first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary(second_sign, second_direction, &first_boundary);
+    let (first_boundary, first_embedding) =
+        boundary(BoundaryMode::Plain, first_sign, first_direction, shape);
+    let (_, second_embedding) = boundary(
+        BoundaryMode::Plain,
+        second_sign,
+        second_direction,
+        &first_boundary,
+    );
     Embedding::compose(&second_embedding, &first_embedding)
 }
 

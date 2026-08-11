@@ -3,8 +3,8 @@ use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
 
-use ofposets::poset::boundary_hat;
 use ofposets::pushout::{Pushout, pushout};
+use ofposets::{BoundaryMode, boundary};
 use ofposets::{
     Embedding, FramedPoset, Renderer, Sign, SignedPermutation, embedding_to_dot, isomorphisms,
     normalize, to_dot, transform,
@@ -111,8 +111,10 @@ fn reconstruct_failure() -> io::Result<AxialFailure> {
     assert_eq!(first.sizes().iter().sum::<usize>(), 4);
     assert_eq!(second.sizes().iter().sum::<usize>(), 4);
 
-    let (first_output_domain, first_output) = boundary_hat(Sign::Output, DIRECTION, &first);
-    let (second_input_domain, second_input) = boundary_hat(Sign::Input, DIRECTION, &second);
+    let (first_output_domain, first_output) =
+        boundary(BoundaryMode::Hat, Sign::Output, DIRECTION, &first);
+    let (second_input_domain, second_input) =
+        boundary(BoundaryMode::Hat, Sign::Input, DIRECTION, &second);
     let mut boundary_isomorphisms = isomorphisms(&first_output_domain, &second_input_domain);
     assert_eq!(
         boundary_isomorphisms.len(),
@@ -123,11 +125,11 @@ fn reconstruct_failure() -> io::Result<AxialFailure> {
     let first_output_into_second = Embedding::compose(&boundary_isomorphism, &second_input);
     let pasted = pushout(&first_output, &first_output_into_second);
 
-    let (_, actual_input) = boundary_hat(Sign::Input, DIRECTION, &pasted.tip);
-    let (_, first_input) = boundary_hat(Sign::Input, DIRECTION, &first);
+    let (_, actual_input) = boundary(BoundaryMode::Hat, Sign::Input, DIRECTION, &pasted.tip);
+    let (_, first_input) = boundary(BoundaryMode::Hat, Sign::Input, DIRECTION, &first);
     let expected_input = Embedding::compose(&first_input, &pasted.inl);
-    let (_, actual_output) = boundary_hat(Sign::Output, DIRECTION, &pasted.tip);
-    let (_, second_output) = boundary_hat(Sign::Output, DIRECTION, &second);
+    let (_, actual_output) = boundary(BoundaryMode::Hat, Sign::Output, DIRECTION, &pasted.tip);
+    let (_, second_output) = boundary(BoundaryMode::Hat, Sign::Output, DIRECTION, &second);
     let expected_output = Embedding::compose(&second_output, &pasted.inr);
 
     assert!(actual_input.is_closed());
@@ -158,9 +160,9 @@ fn assert_transverse_equations(
     pasted: &Pushout,
 ) {
     for sign in [Sign::Input, Sign::Output] {
-        let (_, actual) = boundary_hat(sign, 1, &pasted.tip);
-        let (_, first_boundary) = boundary_hat(sign, 1, first);
-        let (_, second_boundary) = boundary_hat(sign, 1, second);
+        let (_, actual) = boundary(BoundaryMode::Hat, sign, 1, &pasted.tip);
+        let (_, first_boundary) = boundary(BoundaryMode::Hat, sign, 1, first);
+        let (_, second_boundary) = boundary(BoundaryMode::Hat, sign, 1, second);
         let first_boundary = Embedding::compose(&first_boundary, &pasted.inl);
         let second_boundary = Embedding::compose(&second_boundary, &pasted.inr);
         let expected = Embedding::union(&first_boundary, &second_boundary).into_codomain;

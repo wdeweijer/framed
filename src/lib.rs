@@ -17,7 +17,7 @@ pub mod pushout;
 pub mod random;
 pub mod symmetry;
 
-pub use cubularity::{is_cubular, is_strongly_cubular};
+pub use cubularity::{CubularityMode, is_cubular};
 pub use dot::{
     Renderer, compass_spring_debug_json, embedding_to_dot, embedding_to_dot_with_params, to_dot,
     to_dot_with_params,
@@ -28,7 +28,7 @@ pub use orthogonal::{
     orthogonal_product, orthogonal_product_associator, orthogonal_product_commutator,
     orthogonal_product_embedding,
 };
-pub use poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure, shift};
+pub use poset::{BoundaryMode, FramedPoset, FramedPosetSubset, Sign, boundary, closure, shift};
 pub use random::RandomFramedPosetGenerator;
 pub use symmetry::{
     DirectionImage, SignedPermutation, SymmetryError, transform, transform_embedding,
