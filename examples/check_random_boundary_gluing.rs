@@ -18,7 +18,7 @@ use rand::{Rng, SeedableRng, TryRngCore};
 const MAX_ISOMORPHISMS: usize = 10;
 const GENERATION_BATCH_SIZE: usize = 4_096;
 const REPORT_INTERVAL: Duration = Duration::from_secs(5);
-const FAILURE_ROOT: &str = "visualizations/random_3d_boundary_gluing_failures";
+const FAILURE_ROOT: &str = "visualizations/random_boundary_gluing_failures";
 
 #[derive(Debug, Clone, Copy)]
 struct Options {
@@ -93,6 +93,7 @@ struct FailureWitness {
     second_input: Embedding,
     boundary_isomorphism: Embedding,
     pushout: Pushout,
+    glued_passes_cubularity: bool,
     checks: Vec<EquationCheck>,
 }
 
@@ -101,6 +102,7 @@ struct Statistics {
     pairs: u128,
     gluings: u128,
     failing_gluings: u128,
+    cubularity_failures: u128,
     axial_failures: [u128; 2],
     transverse_failures: [u128; 2],
     nonempty_axial_boundary_intersections: u128,
@@ -143,7 +145,7 @@ fn main() -> io::Result<()> {
     let sample_count = options
         .pair_count
         .min(usize::try_from(boundary_index.total_pairs).unwrap_or(options.pair_count));
-    let mut rng = SmallRng::seed_from_u64(derived_seed(options.seed, u64::MAX));
+    let mut rng = SmallRng::seed_from_u64(options.seed.wrapping_sub(1));
     let pairs = sample_pairs(&boundary_index, sample_count, &mut rng);
     let (statistics, first_failure) = check_pairs(
         &shapes,
@@ -151,11 +153,12 @@ fn main() -> io::Result<()> {
         &pairs,
         options.dimension,
         options.boundary_mode,
+        options.cubularity_mode,
     );
-    print_statistics(&statistics, options.dimension);
+    print_statistics(&statistics, options.dimension, options.cubularity_mode);
 
     if let Some(failure) = first_failure {
-        let output_dir = write_failure(options.seed, &failure)?;
+        let output_dir = write_failure(options, &failure)?;
         println!(
             "first failure: pair {}; gluing direction {}; first shape {}; second shape {}; \
              isomorphism {}",
@@ -165,11 +168,14 @@ fn main() -> io::Result<()> {
             failure.second_shape,
             failure.isomorphism + 1
         );
+        if !failure.glued_passes_cubularity {
+            println!("glued OFP failed {:?} cubularity", options.cubularity_mode);
+        }
         println!("wrote failure artifacts to {}", output_dir.display());
     } else {
         println!(
-            "all sampled axial and transverse {:?}-boundary equations held",
-            options.boundary_mode
+            "all glued OFPs passed {:?} cubularity and all sampled axial and transverse {:?}-boundary equations held",
+            options.cubularity_mode, options.boundary_mode
         );
     }
 
@@ -207,20 +213,23 @@ fn parse_options() -> io::Result<Options> {
             "--boundary" => {
                 let value = arguments
                     .next()
-                    .ok_or_else(|| invalid_input("--boundary requires plain or hat"))?;
+                    .ok_or_else(|| invalid_input("--boundary requires plain, hat, or maximal"))?;
                 options.boundary_mode = match value.as_str() {
                     "plain" => BoundaryMode::Plain,
                     "hat" => BoundaryMode::Hat,
-                    _ => return Err(invalid_input("--boundary requires plain or hat")),
+                    "maximal" => BoundaryMode::Maximal,
+                    _ => {
+                        return Err(invalid_input("--boundary requires plain, hat, or maximal"));
+                    }
                 };
             }
             "--strong" => options.cubularity_mode = CubularityMode::Strong,
             "--help" | "-h" => {
                 println!(
                     "Usage: cargo run --release --example \
-                     check_random_3d_boundary_gluing_formulas -- \
+                     check_random_boundary_gluing -- \
                      [--cells N] [--shapes N] [--pairs N] \
-                     [--threads N] [--seed N] [--boundary plain|hat] [--strong]"
+                     [--threads N] [--seed N] [--boundary plain|hat|maximal] [--strong]"
                 );
                 std::process::exit(0);
             }
@@ -328,7 +337,7 @@ fn generate_candidate_batch(
                     for ticket in chunk_start..chunk_end {
                         let stream = u64::try_from(ticket)
                             .expect("candidate ticket must fit into a u64 seed");
-                        let mut rng = SmallRng::seed_from_u64(derived_seed(options.seed, stream));
+                        let mut rng = SmallRng::seed_from_u64(options.seed.wrapping_add(stream));
                         let shape = Arc::new(generator.generate(&mut rng));
                         let is_accepted =
                             is_cubular(options.boundary_mode, options.cubularity_mode, &shape);
@@ -346,13 +355,6 @@ fn generate_candidate_batch(
             .flat_map(|worker| worker.join().expect("generation worker panicked"))
             .collect()
     })
-}
-
-fn derived_seed(seed: u64, stream: u64) -> u64 {
-    let mut value = seed ^ stream.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
 }
 
 fn build_boundary_index(
@@ -492,6 +494,7 @@ fn check_pairs(
     pairs: &[SampledPair],
     direction_count: usize,
     boundary_mode: BoundaryMode,
+    cubularity_mode: CubularityMode,
 ) -> (Statistics, Option<FailureWitness>) {
     let mut statistics = Statistics::default();
     let mut first_failure = None;
@@ -517,6 +520,7 @@ fn check_pairs(
             let first_output_into_second =
                 Embedding::compose(&boundary_isomorphism, &input.into_shape);
             let pasted = pushout(&output.into_shape, &first_output_into_second);
+            let glued_passes_cubularity = is_cubular(boundary_mode, cubularity_mode, &pasted.tip);
             let checks = check_formulas(
                 boundary_mode,
                 direction_count,
@@ -525,9 +529,9 @@ fn check_pairs(
                 class.direction,
                 &pasted,
             );
-            let failed = checks.iter().any(|check| !check.holds);
+            let failed = !glued_passes_cubularity || checks.iter().any(|check| !check.holds);
 
-            statistics.record(&checks);
+            statistics.record(glued_passes_cubularity, &checks);
             if failed && first_failure.is_none() {
                 first_failure = Some(FailureWitness {
                     pair: pair_number,
@@ -541,6 +545,7 @@ fn check_pairs(
                     second_input: input.into_shape.clone(),
                     boundary_isomorphism,
                     pushout: pasted,
+                    glued_passes_cubularity,
                     checks,
                 });
             }
@@ -551,9 +556,10 @@ fn check_pairs(
 }
 
 impl Statistics {
-    fn record(&mut self, checks: &[EquationCheck]) {
+    fn record(&mut self, glued_passes_cubularity: bool, checks: &[EquationCheck]) {
         self.gluings += 1;
-        let mut failed = false;
+        let mut failed = !glued_passes_cubularity;
+        self.cubularity_failures += u128::from(!glued_passes_cubularity);
 
         for check in checks {
             if check.holds {
@@ -707,9 +713,19 @@ fn compare_boundary_with_union(
     }
 }
 
-fn print_statistics(statistics: &Statistics, direction_count: usize) {
+fn print_statistics(
+    statistics: &Statistics,
+    direction_count: usize,
+    cubularity_mode: CubularityMode,
+) {
     println!("sampled compatible ordered pairs: {}", statistics.pairs);
     println!("individual gluings checked: {}", statistics.gluings);
+    println!(
+        "gluings failing {:?} cubularity: {} ({:.4}%)",
+        cubularity_mode,
+        statistics.cubularity_failures,
+        percentage(statistics.cubularity_failures, statistics.gluings)
+    );
     println!(
         "gluings with at least one failure: {} ({:.4}%)",
         statistics.failing_gluings,
@@ -755,8 +771,8 @@ fn print_statistics(statistics: &Statistics, direction_count: usize) {
     }
 }
 
-fn write_failure(seed: u64, failure: &FailureWitness) -> io::Result<PathBuf> {
-    let output_dir = unique_failure_directory(seed, failure.pair + 1)?;
+fn write_failure(options: Options, failure: &FailureWitness) -> io::Result<PathBuf> {
+    let output_dir = unique_failure_directory(options.seed, failure.pair + 1)?;
     write_shape(&output_dir, "first", &failure.first)?;
     write_shape(&output_dir, "second", &failure.second)?;
     write_shape(&output_dir, "pushout", &failure.pushout.tip)?;
@@ -801,12 +817,15 @@ fn write_failure(seed: u64, failure: &FailureWitness) -> io::Result<PathBuf> {
     }
 
     let report = serde_json::json!({
-        "seed": format!("{seed:#018x}"),
+        "seed": format!("{:#018x}", options.seed),
+        "boundary_mode": format!("{:?}", options.boundary_mode),
+        "cubularity_mode": format!("{:?}", options.cubularity_mode),
         "sampled_pair": failure.pair + 1,
         "gluing_direction": failure.gluing_direction,
         "first_shape": failure.first_shape,
         "second_shape": failure.second_shape,
         "isomorphism": failure.isomorphism + 1,
+        "glued_passes_cubularity": failure.glued_passes_cubularity,
         "boundary_isomorphism_map": failure.boundary_isomorphism.map,
         "equations": equations,
     });
@@ -985,6 +1004,11 @@ mod tests {
             let output_into_second =
                 Embedding::compose(&boundary_isomorphisms[0], &input_into_second);
             let pasted = pushout(&output_into_first, &output_into_second);
+            assert!(is_cubular(
+                BoundaryMode::Hat,
+                CubularityMode::Regular,
+                &pasted.tip
+            ));
             let checks = check_formulas(BoundaryMode::Hat, 3, &first, &second, direction, &pasted);
             let failures: Vec<_> = checks
                 .iter()

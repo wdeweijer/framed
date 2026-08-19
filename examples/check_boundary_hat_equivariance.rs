@@ -23,23 +23,28 @@ fn main() -> io::Result<()> {
     let started = Instant::now();
 
     println!(
-        "checking boundary equivariance on {sample_count} random {CELL_COUNT}-cell two-dimensional OFPs (seed {seed:#018x})"
+        "checking hat and maximal boundary equivariance on {sample_count} random {CELL_COUNT}-cell two-dimensional OFPs (seed {seed:#018x})"
     );
 
     for sample in 1..=sample_count {
         let shape = Arc::new(generator.generate(&mut rng));
-        check_equivariance(&shape, &symmetries, seed, sample)?;
+        for mode in [BoundaryMode::Hat, BoundaryMode::Maximal] {
+            check_equivariance(mode, &shape, &symmetries, seed, sample)?;
+        }
 
         if sample.is_multiple_of(REPORT_EVERY) || sample == sample_count {
             println!("checked {sample} OFPs ({:.1?})", started.elapsed());
         }
     }
 
-    println!("boundary was equivariant under all eight symmetries for all {sample_count} samples");
+    println!(
+        "hat and maximal boundaries were equivariant under all eight symmetries for all {sample_count} samples"
+    );
     Ok(())
 }
 
 fn check_equivariance(
+    mode: BoundaryMode,
     shape: &Arc<FramedPoset>,
     symmetries: &[SignedPermutation],
     seed: u64,
@@ -49,7 +54,7 @@ fn check_equivariance(
         .into_iter()
         .flat_map(|sign| {
             (0..2).map(move |direction| {
-                let (_, embedding) = boundary(BoundaryMode::Hat, sign, direction, shape);
+                let (_, embedding) = boundary(mode, sign, direction, shape);
                 (sign, direction, embedding)
             })
         })
@@ -70,7 +75,7 @@ fn check_equivariance(
             let transformed_boundary =
                 transform_embedding(source_boundary, symmetry).map_err(io::Error::other)?;
             let (_, target_boundary) = boundary(
-                BoundaryMode::Hat,
+                mode,
                 target_sign,
                 direction_image.direction,
                 &transformed_shape,
@@ -78,6 +83,7 @@ fn check_equivariance(
 
             if !Embedding::equal(&transformed_boundary, &target_boundary) {
                 return Err(equivariance_failure(
+                    mode,
                     seed,
                     sample,
                     symmetry_index,
@@ -101,6 +107,7 @@ fn check_equivariance(
 
 #[allow(clippy::too_many_arguments)]
 fn equivariance_failure(
+    mode: BoundaryMode,
     seed: u64,
     sample: u64,
     symmetry_index: usize,
@@ -127,7 +134,7 @@ fn equivariance_failure(
         .unwrap_or_else(|error| format!("<serialization failed: {error}>"));
 
     io::Error::other(format!(
-        "boundary equivariance failed with seed {seed:#018x} at sample {sample}: symmetry {symmetry_index} {symmetry:?}, source ({source_sign:?}, {source_direction}), target ({target_sign:?}, {target_direction}); source boundary: {source_boundary_json}; transformed source boundary: {transformed_boundary_json}; direct target boundary: {target_boundary_json}; transformed image map: {:?}; direct target image map: {:?}; source OFP: {source_json}; transformed OFP: {transformed_json}",
+        "{mode:?} boundary equivariance failed with seed {seed:#018x} at sample {sample}: symmetry {symmetry_index} {symmetry:?}, source ({source_sign:?}, {source_direction}), target ({target_sign:?}, {target_direction}); source boundary: {source_boundary_json}; transformed source boundary: {transformed_boundary_json}; direct target boundary: {target_boundary_json}; transformed image map: {:?}; direct target image map: {:?}; source OFP: {source_json}; transformed OFP: {transformed_json}",
         transformed_boundary.map, target_boundary.map
     ))
 }

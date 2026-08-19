@@ -160,7 +160,7 @@ fn main() -> io::Result<()> {
 }
 
 fn sample_worker(worker: usize, seed: u64, context: WorkerContext<'_>) -> Result<(), String> {
-    let mut rng = SmallRng::seed_from_u64(worker_seed(seed, worker));
+    let mut rng = SmallRng::seed_from_u64(seed.wrapping_add(worker as u64));
 
     while !context.stop.load(Ordering::Acquire) {
         let shape = Arc::new(context.generator.generate(&mut rng));
@@ -534,8 +534,4 @@ fn print_raw_line(message: &str) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     write!(stdout, "{message}\r\n")?;
     stdout.flush()
-}
-
-fn worker_seed(seed: u64, worker: usize) -> u64 {
-    seed ^ (worker as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }

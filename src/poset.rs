@@ -26,6 +26,9 @@ pub enum BoundaryMode {
     Plain,
     /// Keep orthogonal cells whose opposite-signed cofaces are also orthogonal.
     Hat,
+    /// Keep cells that are maximal in the orthogonal subposet and have no
+    /// opposite-signed cofaces.
+    Maximal,
 }
 
 impl Sign {
@@ -375,7 +378,7 @@ impl FramedPoset {
 
         if !self.active_directions().into_iter().all(|direction| {
             [Sign::Input, Sign::Output].into_iter().all(|sign| {
-                let (boundary, _) = boundary(BoundaryMode::Hat, sign, direction, &shape);
+                let (boundary, _) = boundary(BoundaryMode::Maximal, sign, direction, &shape);
                 boundary.is_rigid()
             })
         }) {
@@ -613,6 +616,10 @@ pub fn boundary(
         let opposite = sign.opposite();
         for (dim, keep_level) in keep.iter_mut().enumerate() {
             for (pos, is_kept) in keep_level.iter_mut().enumerate() {
+                if !shape.is_orthogonal_to(dim, pos, direction) {
+                    continue;
+                }
+
                 let opposite_cofaces = shape.cofaces_of(opposite, dim, pos);
                 let is_boundary_cell = match mode {
                     BoundaryMode::Plain => opposite_cofaces.is_empty(),
@@ -622,8 +629,19 @@ pub fn boundary(
                             .binary_search(&direction)
                             .is_err()
                     }),
+                    BoundaryMode::Maximal => {
+                        opposite_cofaces.is_empty()
+                            && [Sign::Input, Sign::Output].into_iter().all(|coface_sign| {
+                                shape
+                                    .cofaces_of(coface_sign, dim, pos)
+                                    .iter()
+                                    .all(|&coface| {
+                                        !shape.is_orthogonal_to(dim + 1, coface, direction)
+                                    })
+                            })
+                    }
                 };
-                if shape.is_orthogonal_to(dim, pos, direction) && is_boundary_cell {
+                if is_boundary_cell {
                     *is_kept = true;
                 }
             }
@@ -798,6 +816,26 @@ mod tests {
                 vec![vec![], vec![], vec![], vec![]],
                 vec![vec![1], vec![3], vec![2], vec![3]],
                 vec![vec![1, 3]],
+            ],
+        ))
+    }
+
+    fn subdivided_input_rectangle() -> Arc<FramedPoset> {
+        Arc::new(FramedPoset::from_faces(
+            vec![
+                vec![vec![], vec![], vec![], vec![], vec![]],
+                vec![vec![0], vec![0], vec![1], vec![1], vec![1]],
+                vec![vec![0, 1]],
+            ],
+            vec![
+                vec![vec![], vec![], vec![], vec![], vec![]],
+                vec![vec![0], vec![3], vec![0], vec![2], vec![1]],
+                vec![vec![0, 2, 3]],
+            ],
+            vec![
+                vec![vec![], vec![], vec![], vec![], vec![]],
+                vec![vec![1], vec![4], vec![2], vec![3], vec![4]],
+                vec![vec![1, 4]],
             ],
         ))
     }
@@ -1177,5 +1215,34 @@ mod tests {
         assert_eq!(left.basis_of(1, 0), &vec![1]);
         assert_eq!(left.faces_of(Sign::Input, 1, 0), &vec![0]);
         assert_eq!(left.faces_of(Sign::Output, 1, 0), &vec![1]);
+    }
+
+    #[test]
+    fn maximal_boundaries_agree_with_standard_square_boundaries() {
+        let square = square();
+
+        let (left, left_emb) = boundary(BoundaryMode::Maximal, Sign::Input, 0, &square);
+        assert_eq!(left.sizes(), vec![2, 1]);
+        assert_eq!(left_emb.map, vec![vec![0, 2], vec![2]]);
+
+        let (bottom, bottom_emb) = boundary(BoundaryMode::Maximal, Sign::Input, 1, &square);
+        assert_eq!(bottom.sizes(), vec![2, 1]);
+        assert_eq!(bottom_emb.map, vec![vec![0, 1], vec![0]]);
+    }
+
+    #[test]
+    fn maximal_boundary_excludes_nonmaximal_isolated_hat_seed() {
+        let rectangle = subdivided_input_rectangle();
+
+        let (plain, plain_embedding) = boundary(BoundaryMode::Plain, Sign::Output, 0, &rectangle);
+        let (hat, _) = boundary(BoundaryMode::Hat, Sign::Output, 0, &rectangle);
+        let (maximal, maximal_embedding) =
+            boundary(BoundaryMode::Maximal, Sign::Output, 0, &rectangle);
+
+        assert_eq!(plain.sizes(), vec![2, 1]);
+        assert_eq!(hat.sizes(), vec![3, 1]);
+        assert_eq!(maximal.sizes(), vec![2, 1]);
+        assert_eq!(maximal_embedding.map, vec![vec![1, 4], vec![4]]);
+        assert!(Embedding::equal(&plain_embedding, &maximal_embedding));
     }
 }

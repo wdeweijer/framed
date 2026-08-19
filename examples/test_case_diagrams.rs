@@ -4,7 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ofposets::{
-    BoundaryMode, Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, to_dot,
+    BoundaryMode, Embedding, FramedPoset, Renderer, Sign, SignedPermutation, boundary,
+    embedding_to_dot, to_dot, transform,
 };
 
 fn main() -> std::io::Result<()> {
@@ -20,6 +21,18 @@ fn main() -> std::io::Result<()> {
     fs::write(
         output_dir.join("two_direction_square_compass_spring.dot"),
         to_dot(&square, Renderer::CompassSpring),
+    )?;
+
+    let reflection = SignedPermutation::reflection(2, 0).expect("direction 0 exists");
+    let reflected_square =
+        Arc::new(transform(&square, &reflection).map_err(std::io::Error::other)?);
+    fs::write(
+        output_dir.join("two_direction_square_reflected_0.dot"),
+        to_dot(&reflected_square, Renderer::Ranked),
+    )?;
+    fs::write(
+        output_dir.join("two_direction_square_reflected_0_compass_spring.dot"),
+        to_dot(&reflected_square, Renderer::CompassSpring),
     )?;
 
     write_boundary(output_dir, &square, Sign::Input, 0, "minus_0")?;

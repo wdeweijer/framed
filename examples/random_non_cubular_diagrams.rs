@@ -92,7 +92,7 @@ fn search_worker(
     attempts: Arc<AtomicUsize>,
     sender: mpsc::Sender<SearchMatch>,
 ) {
-    let mut rng = SmallRng::seed_from_u64(worker_seed(seed, worker));
+    let mut rng = SmallRng::seed_from_u64(seed.wrapping_add(worker as u64));
 
     while !found.load(Ordering::Acquire) {
         let candidate = attempts.fetch_add(1, Ordering::Relaxed) + 1;
@@ -136,10 +136,6 @@ fn search_worker(
             return;
         }
     }
-}
-
-fn worker_seed(seed: u64, worker: usize) -> u64 {
-    seed ^ (worker as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
 fn is_cubular(shape: &Arc<FramedPoset>) -> bool {

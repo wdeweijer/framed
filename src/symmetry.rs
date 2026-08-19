@@ -329,6 +329,14 @@ mod tests {
         )
     }
 
+    fn plain_boundary_reflection_witness() -> FramedPoset {
+        FramedPoset::from_faces(
+            vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
+            vec![vec![vec![]], vec![vec![], vec![0]], vec![vec![0, 1]]],
+            vec![vec![vec![]], vec![vec![0], vec![]], vec![vec![]]],
+        )
+    }
+
     #[test]
     fn rejects_invalid_direction_images() {
         assert_eq!(
@@ -448,6 +456,22 @@ mod tests {
                 assert!(FramedPoset::equal(&transformed_boundary, &target_boundary));
             }
         }
+    }
+
+    #[test]
+    fn maximal_boundary_is_equivariant_for_plain_reflection_witness() {
+        let shape = Arc::new(plain_boundary_reflection_witness());
+        let symmetry = SignedPermutation::reflection(2, 0).unwrap();
+        let transformed_shape = Arc::new(transform(&shape, &symmetry).unwrap());
+
+        let (_, source_boundary) = boundary(BoundaryMode::Maximal, Sign::Output, 0, &shape);
+        let transformed_boundary = transform_embedding(&source_boundary, &symmetry).unwrap();
+        let (_, target_boundary) =
+            boundary(BoundaryMode::Maximal, Sign::Input, 0, &transformed_shape);
+
+        assert!(source_boundary.dom.sizes().is_empty());
+        assert!(target_boundary.dom.sizes().is_empty());
+        assert!(Embedding::equal(&transformed_boundary, &target_boundary));
     }
 
     #[test]

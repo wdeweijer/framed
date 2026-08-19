@@ -461,7 +461,11 @@ mod tests {
     #[test]
     fn standard_square_is_strongly_cubular() {
         let shape = square();
-        for boundary_mode in [BoundaryMode::Plain, BoundaryMode::Hat] {
+        for boundary_mode in [
+            BoundaryMode::Plain,
+            BoundaryMode::Hat,
+            BoundaryMode::Maximal,
+        ] {
             assert!(is_cubular(boundary_mode, CubularityMode::Strong, &shape));
             assert!(is_cubular(boundary_mode, CubularityMode::Regular, &shape));
         }
@@ -489,7 +493,11 @@ mod tests {
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
         ));
-        for boundary_mode in [BoundaryMode::Plain, BoundaryMode::Hat] {
+        for boundary_mode in [
+            BoundaryMode::Plain,
+            BoundaryMode::Hat,
+            BoundaryMode::Maximal,
+        ] {
             assert!(is_cubular(boundary_mode, CubularityMode::Strong, &arrow));
         }
     }

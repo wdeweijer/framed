@@ -278,7 +278,7 @@ fn sample_worker(seed: u64, context: WorkerContext<'_>) -> Result<(), String> {
         if ticket == u64::MAX {
             return Err("candidate ticket overflow".to_owned());
         }
-        let mut rng = SmallRng::seed_from_u64(derived_seed(seed, ticket));
+        let mut rng = SmallRng::seed_from_u64(seed.wrapping_add(ticket));
         let shape = Arc::new(context.generator.generate(&mut rng));
         context.generated.fetch_add(1, Ordering::Relaxed);
 
@@ -703,13 +703,6 @@ fn structural_hash(shape: &FramedPoset) -> u64 {
     let mut hasher = DefaultHasher::new();
     shape.hash(&mut hasher);
     hasher.finish()
-}
-
-fn derived_seed(seed: u64, stream: u64) -> u64 {
-    let mut value = seed ^ stream.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
