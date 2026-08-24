@@ -6,13 +6,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use ofposets::{BoundaryMode, CubularityMode, FramedPoset, Renderer, is_cubular, to_dot};
+use ofposets::{
+    BoundaryMode, CubularityMode, FramedPoset, RandomFramedPosetGenerator, Renderer, is_cubular,
+    to_dot,
+};
 use rand::rngs::{OsRng, SmallRng};
-use rand::{Rng, SeedableRng, TryRngCore};
+use rand::{SeedableRng, TryRngCore};
 use rayon::prelude::*;
 
 const DEFAULT_SAMPLE_COUNT: u64 = 100_000;
 const DEFAULT_CELL_COUNT: usize = 9;
+const DEFAULT_FRAME_DIMENSION: usize = 3;
 const REPORT_EVERY: u64 = 1_000_000;
 const WORKER_COUNT: usize = 24;
 const OUTPUT_DIR: &str = "visualizations/random_frame_dimension_counterexamples";
@@ -39,7 +43,8 @@ struct Witness {
 }
 
 fn main() -> io::Result<()> {
-    let (sample_count, cell_count, seed) = arguments()?;
+    let (sample_count, cell_count, frame_dimension, seed) = arguments()?;
+    let generator = RandomFramedPosetGenerator::new_without_full_basis(frame_dimension, cell_count);
     let statistics = Statistics::default();
     let first_connected = Mutex::new(None);
     let first_rigid = Mutex::new(None);
@@ -50,16 +55,21 @@ fn main() -> io::Result<()> {
         .map_err(io::Error::other)?;
 
     println!(
-        "checking {sample_count} random {cell_count}-cell OFPs with frame {{0,1}} and no \
-         {{0,1}}-cells on {WORKER_COUNT} threads (seed {seed:#018x})"
+        "checking {sample_count} random {cell_count}-cell OFPs with frame directions {:?}, \
+         dimension {}, and no full-frame cells on {WORKER_COUNT} threads (seed {seed:#018x})",
+        (0..frame_dimension).collect::<Vec<_>>(),
+        frame_dimension - 1,
     );
 
     pool.install(|| {
         (1..=sample_count).into_par_iter().for_each(|sample| {
             let mut rng = SmallRng::seed_from_u64(seed.wrapping_add(sample));
-            let shape = Arc::new(generate_candidate(cell_count, &mut rng));
-            debug_assert_eq!(shape.active_directions(), vec![0, 1]);
-            debug_assert_eq!(shape.dim(), 1);
+            let shape = Arc::new(generator.generate(&mut rng));
+            debug_assert_eq!(
+                shape.active_directions(),
+                (0..frame_dimension).collect::<Vec<_>>()
+            );
+            debug_assert_eq!(shape.dim(), frame_dimension as isize - 1);
 
             if is_cubular(BoundaryMode::Maximal, CubularityMode::Strong, &shape) {
                 statistics.strongly_cubular.fetch_add(1, Ordering::Relaxed);
@@ -93,10 +103,10 @@ fn main() -> io::Result<()> {
         .expect("rigid-witness mutex was poisoned");
 
     if let Some(witness) = &first_connected {
-        write_witness("connected", witness.sample, &witness.shape)?;
+        write_witness("connected", frame_dimension, witness.sample, &witness.shape)?;
     }
     if let Some(witness) = &first_rigid {
-        write_witness("rigid", witness.sample, &witness.shape)?;
+        write_witness("rigid", frame_dimension, witness.sample, &witness.shape)?;
     }
 
     println!("generated: {}", statistics.generated);
@@ -159,54 +169,6 @@ fn retain_earliest(slot: &Mutex<Option<Witness>>, sample: u64, shape: &Arc<Frame
     }
 }
 
-/// Generate a well-formed OFP whose bases are exactly empty, `{0}`, and `{1}`.
-fn generate_candidate<R: Rng + ?Sized>(cell_count: usize, rng: &mut R) -> FramedPoset {
-    let point_count = rng.random_range(1..=cell_count - 2);
-    let direction_0_count = rng.random_range(1..cell_count - point_count);
-    let direction_1_count = cell_count - point_count - direction_0_count;
-
-    let basis = vec![
-        vec![vec![]; point_count],
-        (0..direction_0_count)
-            .map(|_| vec![0])
-            .chain((0..direction_1_count).map(|_| vec![1]))
-            .collect(),
-    ];
-    let mut faces_in = vec![vec![vec![]; point_count], Vec::new()];
-    let mut faces_out = faces_in.clone();
-
-    for _ in 0..direction_0_count + direction_1_count {
-        let (input, output) = random_nonempty_signed_subset(point_count, rng);
-        faces_in[1].push(input);
-        faces_out[1].push(output);
-    }
-
-    FramedPoset::from_faces(basis, faces_in, faces_out)
-}
-
-fn random_nonempty_signed_subset<R: Rng + ?Sized>(
-    size: usize,
-    rng: &mut R,
-) -> (Vec<usize>, Vec<usize>) {
-    loop {
-        let mut input = Vec::new();
-        let mut output = Vec::new();
-
-        for point in 0..size {
-            match rng.random_range(0..3) {
-                0 => {}
-                1 => input.push(point),
-                2 => output.push(point),
-                _ => unreachable!(),
-            }
-        }
-
-        if !input.is_empty() || !output.is_empty() {
-            return (input, output);
-        }
-    }
-}
-
 fn report_progress(completed: u64, sample_count: u64, started: Instant) {
     if completed.is_multiple_of(REPORT_EVERY) || completed == sample_count {
         println!(
@@ -216,10 +178,15 @@ fn report_progress(completed: u64, sample_count: u64, started: Instant) {
     }
 }
 
-fn write_witness(kind: &str, sample: u64, shape: &FramedPoset) -> io::Result<PathBuf> {
+fn write_witness(
+    kind: &str,
+    frame_dimension: usize,
+    sample: u64,
+    shape: &FramedPoset,
+) -> io::Result<PathBuf> {
     let output_dir = Path::new(OUTPUT_DIR);
     fs::create_dir_all(output_dir)?;
-    let stem = format!("first_{kind}_sample_{sample}");
+    let stem = format!("frame_{frame_dimension}_first_{kind}_sample_{sample}");
 
     fs::write(
         output_dir.join(format!("{stem}.ofp.json")),
@@ -240,7 +207,7 @@ fn write_witness(kind: &str, sample: u64, shape: &FramedPoset) -> io::Result<Pat
     Ok(output_dir.to_path_buf())
 }
 
-fn arguments() -> io::Result<(u64, usize, u64)> {
+fn arguments() -> io::Result<(u64, usize, usize, u64)> {
     let mut arguments = env::args().skip(1);
     let sample_count = arguments
         .next()
@@ -252,6 +219,11 @@ fn arguments() -> io::Result<(u64, usize, u64)> {
         .map(|value| parse_usize("cell count", &value))
         .transpose()?
         .unwrap_or(DEFAULT_CELL_COUNT);
+    let frame_dimension = arguments
+        .next()
+        .map(|value| parse_usize("frame dimension", &value))
+        .transpose()?
+        .unwrap_or(DEFAULT_FRAME_DIMENSION);
     let seed = arguments
         .next()
         .map(|value| parse_u64("seed", &value))
@@ -260,19 +232,28 @@ fn arguments() -> io::Result<(u64, usize, u64)> {
 
     if arguments.next().is_some() {
         return Err(invalid_input(
-            "usage: check_random_frame_dimension [sample-count] [cell-count] [seed]",
+            "usage: check_random_frame_dimension [sample-count] [cell-count] \
+             [frame-dimension] [seed]",
         ));
     }
     if sample_count == 0 {
         return Err(invalid_input("sample count must be positive"));
     }
-    if cell_count < 3 {
+    if !(2..usize::BITS as usize).contains(&frame_dimension) {
         return Err(invalid_input(
-            "cell count must be at least 3 to contain a point and both edge directions",
+            "frame dimension must be at least 2 and smaller than the number of bits in usize",
         ));
     }
+    let minimum_cell_count = (1usize << (frame_dimension - 1)) + 1;
+    if cell_count < minimum_cell_count {
+        return Err(invalid_input(format!(
+            "cell count must be at least {minimum_cell_count} for frame dimension \
+             {frame_dimension} and OFP dimension {}",
+            frame_dimension - 1
+        )));
+    }
 
-    Ok((sample_count, cell_count, seed))
+    Ok((sample_count, cell_count, frame_dimension, seed))
 }
 
 fn parse_u64(name: &str, value: &str) -> io::Result<u64> {

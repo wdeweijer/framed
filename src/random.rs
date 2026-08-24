@@ -11,9 +11,8 @@ use crate::poset::FramedPoset;
 /// Reusable generator for finite oriented framed posets.
 ///
 /// A generator with `dimension = d` uses precisely the directions
-/// `0, ..., d - 1`. Every generated poset has exactly `cell_count` cells and
-/// at least one cell for each of the `2^d` possible bases. Consequently it
-/// has at least one cell with full basis `{0, ..., d - 1}`.
+/// `0, ..., d - 1` and produces posets with exactly `cell_count` cells. The
+/// constructor determines whether the full basis is present.
 ///
 /// The Boolean lattice of bases and its cover relations are computed once by
 /// [`Self::new`]. A generator is immutable and can be shared between threads.
@@ -23,6 +22,13 @@ pub struct RandomFramedPosetGenerator {
     cell_count: usize,
     basis_by_mask: Vec<IntSet>,
     face_masks_by_mask: Vec<Vec<usize>>,
+    profile_mode: ProfileMode,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ProfileMode {
+    AllBases,
+    ProperBases,
 }
 
 impl RandomFramedPosetGenerator {
@@ -37,16 +43,58 @@ impl RandomFramedPosetGenerator {
     /// Panics if `dimension` cannot be represented by the internal bit masks,
     /// or if fewer than `2^dimension` cells are requested.
     pub fn new(dimension: usize, cell_count: usize) -> Self {
-        assert!(
-            dimension < usize::BITS as usize,
-            "dimension must be smaller than the number of bits in usize"
-        );
-
-        let basis_count = 1usize << dimension;
+        let basis_count = basis_count(dimension);
         assert!(
             cell_count >= basis_count,
             "at least {basis_count} cells are required to generate a \
              {dimension}-dimensional poset"
+        );
+
+        Self::with_basis_count(dimension, cell_count, basis_count, ProfileMode::AllBases)
+    }
+
+    /// Prepare a generator whose frame has `frame_dimension` directions but
+    /// whose cells all have proper subsets of the full frame as their bases.
+    ///
+    /// Every generated OFP has all `frame_dimension` directions active and
+    /// has dimension exactly `frame_dimension - 1`. Its realized bases form a
+    /// random downward-closed family. Thus every OFP with these dimensions and
+    /// the requested number of cells has positive probability, up to the
+    /// ordering of cells within each level.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `frame_dimension` is less than two or cannot be represented
+    /// by the internal bit masks, or if there are too few cells to contain one
+    /// codimension-one basis, all of its subbases, and the remaining direction.
+    pub fn new_without_full_basis(frame_dimension: usize, cell_count: usize) -> Self {
+        assert!(frame_dimension >= 2, "frame dimension must be at least 2");
+        let full_basis_count = basis_count(frame_dimension);
+        let minimum_cell_count = (1usize << (frame_dimension - 1)) + 1;
+        assert!(
+            cell_count >= minimum_cell_count,
+            "at least {minimum_cell_count} cells are required to generate a poset with frame \
+             dimension {frame_dimension}, dimension {}, and no full-basis cell",
+            frame_dimension - 1
+        );
+
+        Self::with_basis_count(
+            frame_dimension,
+            cell_count,
+            full_basis_count - 1,
+            ProfileMode::ProperBases,
+        )
+    }
+
+    fn with_basis_count(
+        dimension: usize,
+        cell_count: usize,
+        basis_count: usize,
+        profile_mode: ProfileMode,
+    ) -> Self {
+        debug_assert!(
+            dimension < usize::BITS as usize,
+            "dimension must be smaller than the number of bits in usize"
         );
 
         let basis_by_mask: Vec<_> = (0..basis_count)
@@ -66,6 +114,7 @@ impl RandomFramedPosetGenerator {
             cell_count,
             basis_by_mask,
             face_masks_by_mask,
+            profile_mode,
         }
     }
 
@@ -86,8 +135,16 @@ impl RandomFramedPosetGenerator {
     }
 
     /// Sample a profile uniformly from the positive compositions of the cell
-    /// count, using the standard stars-and-bars bijection.
+    /// count, or sample a downward-closed proper-basis profile.
     fn random_profile<R: Rng + ?Sized>(&self, rng: &mut R) -> Vec<usize> {
+        match self.profile_mode {
+            ProfileMode::AllBases => self.random_all_bases_profile(rng),
+            ProfileMode::ProperBases => self.random_proper_bases_profile(rng),
+        }
+    }
+
+    /// Sample uniformly from positive compositions using stars and bars.
+    fn random_all_bases_profile<R: Rng + ?Sized>(&self, rng: &mut R) -> Vec<usize> {
         let basis_count = self.basis_by_mask.len();
         let mut cuts = index::sample(rng, self.cell_count - 1, basis_count - 1).into_vec();
         for cut in &mut cuts {
@@ -104,16 +161,68 @@ impl RandomFramedPosetGenerator {
         profile
     }
 
+    fn random_proper_bases_profile<R: Rng + ?Sized>(&self, rng: &mut R) -> Vec<usize> {
+        let mut profile = vec![0; self.basis_by_mask.len()];
+        let full_mask = (1usize << self.dimension) - 1;
+        let omitted_direction = rng.random_range(0..self.dimension);
+        let primary_coatom = full_mask & !(1 << omitted_direction);
+
+        // The primary coatom and its subbases ensure the requested dimension;
+        // all singleton bases ensure that every frame direction is active.
+        for (mask, count) in profile.iter_mut().enumerate() {
+            if mask & !primary_coatom == 0 || mask.count_ones() == 1 {
+                *count = 1;
+            }
+        }
+
+        let mut selected_count = profile.iter().sum::<usize>();
+        for mask in 1..profile.len() {
+            if profile[mask] == 0
+                && selected_count < self.cell_count
+                && self.face_masks_by_mask[mask]
+                    .iter()
+                    .all(|&face_mask| profile[face_mask] != 0)
+                && rng.random_bool(0.5)
+            {
+                profile[mask] = 1;
+                selected_count += 1;
+            }
+        }
+
+        let selected_masks: Vec<_> = profile
+            .iter()
+            .enumerate()
+            .filter_map(|(mask, &count)| (count != 0).then_some(mask))
+            .collect();
+        for _ in selected_count..self.cell_count {
+            let mask = selected_masks[rng.random_range(0..selected_masks.len())];
+            profile[mask] += 1;
+        }
+
+        profile
+    }
+
     fn generate_with_profile<R: Rng + ?Sized>(
         &self,
         profile: &[usize],
         rng: &mut R,
     ) -> FramedPoset {
         debug_assert_eq!(profile.len(), self.basis_by_mask.len());
-        debug_assert!(profile.iter().all(|&count| count > 0));
         debug_assert_eq!(profile.iter().sum::<usize>(), self.cell_count);
+        debug_assert!(profile.iter().enumerate().all(|(mask, &count)| {
+            count == 0
+                || self.face_masks_by_mask[mask]
+                    .iter()
+                    .all(|&face_mask| profile[face_mask] != 0)
+        }));
 
-        let mut basis = vec![Vec::new(); self.dimension + 1];
+        let level_count = self
+            .basis_by_mask
+            .iter()
+            .map(Vec::len)
+            .max()
+            .map_or(0, |maximum| maximum + 1);
+        let mut basis = vec![Vec::new(); level_count];
         let mut ranges: Vec<Range<usize>> = vec![0..0; self.basis_by_mask.len()];
 
         for (mask, cell_basis) in self.basis_by_mask.iter().enumerate() {
@@ -149,6 +258,14 @@ impl RandomFramedPosetGenerator {
         debug_assert!(poset.well_formed());
         poset
     }
+}
+
+fn basis_count(dimension: usize) -> usize {
+    assert!(
+        dimension < usize::BITS as usize,
+        "dimension must be smaller than the number of bits in usize"
+    );
+    1usize << dimension
 }
 
 fn basis_from_mask(mask: usize, dimension: usize) -> IntSet {
@@ -215,6 +332,30 @@ mod tests {
     }
 
     #[test]
+    fn generates_well_formed_posets_without_full_basis() {
+        let mut rng = SmallRng::seed_from_u64(0x0f_50_5e_75_00);
+
+        for frame_dimension in 2..=5 {
+            let minimum = (1usize << (frame_dimension - 1)) + 1;
+            for cell_count in minimum..=minimum + 4 {
+                let generator =
+                    RandomFramedPosetGenerator::new_without_full_basis(frame_dimension, cell_count);
+
+                for _ in 0..32 {
+                    let poset = generator.generate(&mut rng);
+                    assert_eq!(poset.sizes().iter().sum::<usize>(), cell_count);
+                    assert_eq!(poset.dim(), frame_dimension as isize - 1);
+                    assert_eq!(
+                        poset.active_directions(),
+                        (0..frame_dimension).collect::<Vec<_>>()
+                    );
+                    assert!(poset.well_formed());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn minimum_profile_has_one_cell_per_basis() {
         let mut rng = SmallRng::seed_from_u64(0x08);
 
@@ -237,6 +378,12 @@ mod tests {
     #[should_panic(expected = "at least 8 cells are required")]
     fn rejects_too_few_cells() {
         RandomFramedPosetGenerator::new(3, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "at least 9 cells are required")]
+    fn rejects_too_few_cells_without_full_basis() {
+        RandomFramedPosetGenerator::new_without_full_basis(4, 8);
     }
 
     #[test]
