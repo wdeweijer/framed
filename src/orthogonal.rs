@@ -127,9 +127,11 @@ impl OrthogonalProductData {
 
 fn cell_offsets(sizes: &[usize]) -> Vec<usize> {
     let mut offsets = Vec::with_capacity(sizes.len() + 1);
-    offsets.push(0);
+    let mut total = 0;
+    offsets.push(total);
     for &size in sizes {
-        offsets.push(offsets.last().copied().unwrap() + size);
+        total += size;
+        offsets.push(total);
     }
     offsets
 }
