@@ -5,6 +5,7 @@
 //! and pushouts of embeddings, without any diagram language or normalisation
 //! machinery.
 
+pub mod box_construction;
 pub mod compass_spring_nd;
 pub mod cubularity;
 pub mod dot;
@@ -18,6 +19,10 @@ pub mod random;
 pub mod symmetry;
 pub mod volumetric;
 
+pub use box_construction::{
+    BoxConstruction, BoxFace, BoxFaceEmbedding, BoxGluing, box_construction, elementary_cylinder,
+    rigid_box_construction,
+};
 pub use cubularity::{CubularityMode, is_cubular};
 pub use dot::{
     Renderer, compass_spring_debug_json, embedding_to_dot, embedding_to_dot_with_params, to_dot,
