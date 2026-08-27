@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use ofposets::{
-    BoundaryMode, Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Renderer,
-    Sign, boundary, embedding_to_dot, to_dot,
+    Embedding, FramedPoset, FramedPosetSubset, RandomFramedPosetGenerator, Renderer, Sign,
+    boundary, embedding_to_dot, iterated_boundary, to_dot,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
@@ -131,8 +131,8 @@ fn search_worker(
 
 fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
     for (sign_0, sign_1) in SIGN_PAIRS {
-        let zero_then_one = iterated_boundary(shape, sign_0, 0, sign_1, 1);
-        let one_then_zero = iterated_boundary(shape, sign_1, 1, sign_0, 0);
+        let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
+        let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
 
         if !Embedding::equal(&zero_then_one, &one_then_zero) {
             return false;
@@ -147,10 +147,10 @@ fn boundary_intersection_embeddings(
     sign_0: Sign,
     sign_1: Sign,
 ) -> (Embedding, Embedding) {
-    let (_, boundary_0) = boundary(BoundaryMode::Plain, sign_0, 0, shape);
-    let (_, boundary_1) = boundary(BoundaryMode::Plain, sign_1, 1, shape);
+    let (_, boundary_0) = boundary(sign_0, 0, shape);
+    let (_, boundary_1) = boundary(sign_1, 1, shape);
     let intersection = Embedding::intersection(&boundary_0, &boundary_1).into_codomain;
-    let iterated = iterated_boundary(shape, sign_1, 1, sign_0, 0);
+    let (_, iterated) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
 
     (iterated, intersection)
 }
@@ -222,24 +222,6 @@ fn sign_file_name(sign: Sign) -> &'static str {
         Sign::Input => "minus",
         Sign::Output => "plus",
     }
-}
-
-fn iterated_boundary(
-    shape: &Arc<FramedPoset>,
-    first_sign: Sign,
-    first_direction: usize,
-    second_sign: Sign,
-    second_direction: usize,
-) -> Embedding {
-    let (first_boundary, first_embedding) =
-        boundary(BoundaryMode::Plain, first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary(
-        BoundaryMode::Plain,
-        second_sign,
-        second_direction,
-        &first_boundary,
-    );
-    Embedding::compose(&second_embedding, &first_embedding)
 }
 
 #[cfg(test)]

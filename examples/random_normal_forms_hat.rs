@@ -11,10 +11,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use ofposets::{BoundaryMode, boundary};
 use ofposets::{
     DirectionImage, Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, SignedPermutation,
-    normalize, transform,
+    iterated_boundary, normalize, transform,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
@@ -165,7 +164,7 @@ fn sample_worker(worker: usize, seed: u64, context: WorkerContext<'_>) -> Result
     while !context.stop.load(Ordering::Acquire) {
         let shape = Arc::new(context.generator.generate(&mut rng));
         context.generated.fetch_add(1, Ordering::Relaxed);
-        if !is_hat_cubular(&shape) {
+        if !is_cubular(&shape) {
             continue;
         }
 
@@ -291,7 +290,7 @@ fn analyze_orbit(
     for symmetry in symmetries {
         let transformed = transform(normal, symmetry)
             .map_err(|error| format!("could not apply symmetry {symmetry:?}: {error}"))?;
-        debug_assert!(is_hat_cubular(&Arc::new(transformed.clone())));
+        debug_assert!(is_cubular(&Arc::new(transformed.clone())));
         let image = Arc::new(normalize(&transformed));
         if distinct
             .iter()
@@ -322,30 +321,12 @@ fn analyze_orbit(
     })
 }
 
-fn is_hat_cubular(shape: &Arc<FramedPoset>) -> bool {
+fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
     SIGN_PAIRS.into_iter().all(|(sign_0, sign_1)| {
-        let zero_then_one = iterated_hat_boundary(shape, sign_0, 0, sign_1, 1);
-        let one_then_zero = iterated_hat_boundary(shape, sign_1, 1, sign_0, 0);
+        let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
+        let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
         Embedding::equal(&zero_then_one, &one_then_zero)
     })
-}
-
-fn iterated_hat_boundary(
-    shape: &Arc<FramedPoset>,
-    first_sign: Sign,
-    first_direction: usize,
-    second_sign: Sign,
-    second_direction: usize,
-) -> Embedding {
-    let (first_boundary, first_embedding) =
-        boundary(BoundaryMode::Hat, first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary(
-        BoundaryMode::Hat,
-        second_sign,
-        second_direction,
-        &first_boundary,
-    );
-    Embedding::compose(&second_embedding, &first_embedding)
 }
 
 fn two_dimensional_symmetries() -> Vec<SignedPermutation> {

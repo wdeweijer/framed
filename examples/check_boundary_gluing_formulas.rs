@@ -11,10 +11,10 @@ use std::thread;
 use std::time::Duration;
 
 use ofposets::pushout::pushout;
-use ofposets::{BoundaryMode, CubularityMode, boundary};
+use ofposets::{CubularityMode, boundary};
 use ofposets::{
     DirectionImage, Embedding, FramedPoset, Sign, SignedPermutation, is_cubular, isomorphisms,
-    normalize, transform,
+    iterated_boundary, normalize, transform,
 };
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -663,8 +663,8 @@ fn compare_boundary_with_side(
     side: &Arc<FramedPoset>,
     side_into_pasted: &Embedding,
 ) -> bool {
-    let (_, actual) = boundary(BoundaryMode::Hat, sign, direction, pasted);
-    let (_, into_side) = boundary(BoundaryMode::Hat, sign, direction, side);
+    let (_, actual) = boundary(sign, direction, pasted);
+    let (_, into_side) = boundary(sign, direction, side);
     let expected = Embedding::compose(&into_side, side_into_pasted);
     let actual_closed = actual.is_closed();
     let expected_closed = expected.is_closed();
@@ -682,9 +682,9 @@ fn compare_boundary_with_union(
     second: &Arc<FramedPoset>,
     second_into_pasted: &Embedding,
 ) -> bool {
-    let (_, actual) = boundary(BoundaryMode::Hat, sign, direction, pasted);
-    let (_, first_boundary) = boundary(BoundaryMode::Hat, sign, direction, first);
-    let (_, second_boundary) = boundary(BoundaryMode::Hat, sign, direction, second);
+    let (_, actual) = boundary(sign, direction, pasted);
+    let (_, first_boundary) = boundary(sign, direction, first);
+    let (_, second_boundary) = boundary(sign, direction, second);
     let first_boundary = Embedding::compose(&first_boundary, first_into_pasted);
     let second_boundary = Embedding::compose(&second_boundary, second_into_pasted);
 
@@ -838,7 +838,7 @@ fn prepare_boundary_batch(
                         for direction in 0..2 {
                             for sign in [Sign::Input, Sign::Output] {
                                 let (boundary, into_shape) =
-                                    boundary(BoundaryMode::Hat, sign, direction, &shape.poset);
+                                    boundary(sign, direction, &shape.poset);
                                 let canonical = Arc::new(normalize(&boundary));
                                 prepared.push(PreparedBoundaryOccurrence {
                                     shape_id: chunk_start + offset,
@@ -1096,7 +1096,7 @@ fn validate_record(
     }
     let normal = Arc::new(normal);
     let basic = is_basic_two_dimensional_cubular(&normal);
-    let generalized = is_cubular(BoundaryMode::Hat, CubularityMode::Regular, &normal);
+    let generalized = is_cubular(CubularityMode::Regular, &normal);
     if generalized != basic {
         return Err(invalid_line(
             path,
@@ -1107,9 +1107,9 @@ fn validate_record(
         ));
     }
     if !generalized {
-        return Err(invalid_line(path, line, "OFP is not hat-boundary cubular"));
+        return Err(invalid_line(path, line, "OFP is not cubular"));
     }
-    if require_strong && !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &normal) {
+    if require_strong && !is_cubular(CubularityMode::Strong, &normal) {
         return Err(invalid_line(path, line, "OFP is not strongly cubular"));
     }
     Ok(())
@@ -1127,7 +1127,7 @@ fn symmetry_images(
         let transformed = transform(&shape, symmetry).map_err(|error| error.to_string())?;
         let image = Arc::new(normalize(&transformed));
         let basic = is_basic_two_dimensional_cubular(&image);
-        let generalized = is_cubular(BoundaryMode::Hat, CubularityMode::Regular, &image);
+        let generalized = is_cubular(CubularityMode::Regular, &image);
         if generalized != basic {
             return Err(format!(
                 "symmetry {symmetry_index} has generalized cubularity {generalized} but basic cubularity {basic}"
@@ -1136,7 +1136,7 @@ fn symmetry_images(
         if !generalized {
             return Err(format!("symmetry {symmetry_index} is not cubular"));
         }
-        if require_strong && !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &image) {
+        if require_strong && !is_cubular(CubularityMode::Strong, &image) {
             return Err(format!("symmetry {symmetry_index} is not strongly cubular"));
         }
         if images
@@ -1155,22 +1155,10 @@ fn symmetry_images(
 
 fn is_basic_two_dimensional_cubular(shape: &Arc<FramedPoset>) -> bool {
     SIGN_PAIRS.into_iter().all(|(sign_0, sign_1)| {
-        let zero_then_one = iterated_boundary(shape, sign_0, 0, sign_1, 1);
-        let one_then_zero = iterated_boundary(shape, sign_1, 1, sign_0, 0);
+        let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
+        let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
         Embedding::equal(&zero_then_one, &one_then_zero)
     })
-}
-
-fn iterated_boundary(
-    shape: &Arc<FramedPoset>,
-    first_sign: Sign,
-    first_direction: usize,
-    second_sign: Sign,
-    second_direction: usize,
-) -> Embedding {
-    let (first, first_into_shape) = boundary(BoundaryMode::Hat, first_sign, first_direction, shape);
-    let (_, second_into_first) = boundary(BoundaryMode::Hat, second_sign, second_direction, &first);
-    Embedding::compose(&second_into_first, &first_into_shape)
 }
 
 fn two_dimensional_symmetries() -> Vec<SignedPermutation> {

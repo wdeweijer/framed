@@ -19,18 +19,6 @@ pub enum Sign {
     Output,
 }
 
-/// Choice of directional boundary definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BoundaryMode {
-    /// Keep orthogonal cells with no opposite-signed cofaces.
-    Plain,
-    /// Keep orthogonal cells whose opposite-signed cofaces are also orthogonal.
-    Hat,
-    /// Keep cells that are maximal in the orthogonal subposet and have no
-    /// opposite-signed cofaces.
-    Maximal,
-}
-
 impl Sign {
     pub(crate) fn opposite(self) -> Self {
         match self {
@@ -378,7 +366,7 @@ impl FramedPoset {
 
         if !self.active_directions().into_iter().all(|direction| {
             [Sign::Input, Sign::Output].into_iter().all(|sign| {
-                let (boundary, _) = boundary(BoundaryMode::Maximal, sign, direction, &shape);
+                let (boundary, _) = boundary(sign, direction, &shape);
                 boundary.is_rigid()
             })
         }) {
@@ -594,9 +582,13 @@ pub fn shift(shape: &FramedPoset) -> FramedPoset {
     shifted
 }
 
-/// Compute a directional boundary of a framed poset.
+/// Compute the closed directional boundary of a framed poset.
+///
+/// Before taking downward closure, this selects the cells orthogonal to
+/// `direction` that have no opposite-signed cofaces and whose same-signed
+/// cofaces all have width in `direction`. Equivalently, these are the
+/// sign-maximal cells of the subposet orthogonal to `direction`.
 pub fn boundary(
-    mode: BoundaryMode,
     sign: Sign,
     direction: usize,
     shape: &Arc<FramedPoset>,
@@ -620,27 +612,11 @@ pub fn boundary(
                     continue;
                 }
 
-                let opposite_cofaces = shape.cofaces_of(opposite, dim, pos);
-                let is_boundary_cell = match mode {
-                    BoundaryMode::Plain => opposite_cofaces.is_empty(),
-                    BoundaryMode::Hat => opposite_cofaces.iter().all(|&coface| {
-                        shape
-                            .basis_of(dim + 1, coface)
-                            .binary_search(&direction)
-                            .is_err()
-                    }),
-                    BoundaryMode::Maximal => {
-                        opposite_cofaces.is_empty()
-                            && [Sign::Input, Sign::Output].into_iter().all(|coface_sign| {
-                                shape
-                                    .cofaces_of(coface_sign, dim, pos)
-                                    .iter()
-                                    .all(|&coface| {
-                                        !shape.is_orthogonal_to(dim + 1, coface, direction)
-                                    })
-                            })
-                    }
-                };
+                let is_boundary_cell = shape.cofaces_of(opposite, dim, pos).is_empty()
+                    && shape
+                        .cofaces_of(sign, dim, pos)
+                        .iter()
+                        .all(|&coface| !shape.is_orthogonal_to(dim + 1, coface, direction));
                 if is_boundary_cell {
                     *is_kept = true;
                 }
@@ -650,6 +626,31 @@ pub fn boundary(
         let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
         closure(&subset)
     }
+}
+
+/// Apply a sequence of directional boundaries.
+///
+/// The entries of `word` are applied from left to right. The returned
+/// embedding has the final boundary as its domain and `shape` as its
+/// codomain. An empty word returns `shape` together with its identity
+/// embedding.
+pub fn iterated_boundary(
+    word: &[(Sign, usize)],
+    shape: &Arc<FramedPoset>,
+) -> (Arc<FramedPoset>, Embedding) {
+    let Some((&(first_sign, first_direction), remaining)) = word.split_first() else {
+        return (Arc::clone(shape), Embedding::id(Arc::clone(shape)));
+    };
+
+    let (mut current, mut into_shape) = boundary(first_sign, first_direction, shape);
+    for &(sign, direction) in remaining {
+        let (next, into_current) = boundary(sign, direction, &current);
+        into_shape = Embedding::compose(&into_current, &into_shape);
+        current = next;
+    }
+
+    debug_assert!(FramedPoset::equal(&current, &into_shape.dom));
+    (current, into_shape)
 }
 
 /// Compute the smallest closed embedding whose image contains `subset`.
@@ -925,12 +926,7 @@ mod tests {
             crate::isomorphism::isomorphisms(&half_arrow, &half_arrow).len(),
             1
         );
-        assert!(
-            boundary(BoundaryMode::Hat, Sign::Output, 0, &half_arrow)
-                .0
-                .sizes()
-                .is_empty()
-        );
+        assert!(boundary(Sign::Output, 0, &half_arrow).0.sizes().is_empty());
         assert!(!half_arrow.is_rigid());
         assert!(square().is_rigid());
     }
@@ -1010,7 +1006,7 @@ mod tests {
     #[test]
     fn subset_from_embedding_marks_image_cells() {
         let arrow = tight_arrow();
-        let (_, input_embedding) = boundary(BoundaryMode::Plain, Sign::Input, 0, &arrow);
+        let (_, input_embedding) = boundary(Sign::Input, 0, &arrow);
         let subset = FramedPosetSubset::from_embedding(&input_embedding);
 
         assert!(subset.contains(0, 0));
@@ -1047,7 +1043,7 @@ mod tests {
     #[test]
     fn closure_of_closed_embedding_subset_is_equal_to_original() {
         let square = square();
-        let (_, original) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
+        let (_, original) = boundary(Sign::Input, 0, &square);
         let subset = FramedPosetSubset::from_embedding(&original);
 
         let (_, closed) = closure(&subset);
@@ -1149,11 +1145,11 @@ mod tests {
     fn tight_arrow_boundaries() {
         let arrow = tight_arrow();
 
-        let (input, input_emb) = boundary(BoundaryMode::Plain, Sign::Input, 0, &arrow);
+        let (input, input_emb) = boundary(Sign::Input, 0, &arrow);
         assert_eq!(input.sizes(), vec![1]);
         assert_eq!(input_emb.map, vec![vec![0]]);
 
-        let (output, output_emb) = boundary(BoundaryMode::Plain, Sign::Output, 0, &arrow);
+        let (output, output_emb) = boundary(Sign::Output, 0, &arrow);
         assert_eq!(output.sizes(), vec![1]);
         assert_eq!(output_emb.map, vec![vec![1]]);
     }
@@ -1162,11 +1158,11 @@ mod tests {
     fn two_direction_boundaries_differ() {
         let square = square();
 
-        let (left, left_emb) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
+        let (left, left_emb) = boundary(Sign::Input, 0, &square);
         assert_eq!(left.sizes(), vec![2, 1]);
         assert_eq!(left_emb.map, vec![vec![0, 2], vec![2]]);
 
-        let (bottom, bottom_emb) = boundary(BoundaryMode::Plain, Sign::Input, 1, &square);
+        let (bottom, bottom_emb) = boundary(Sign::Input, 1, &square);
         assert_eq!(bottom.sizes(), vec![2, 1]);
         assert_eq!(bottom_emb.map, vec![vec![0, 1], vec![0]]);
     }
@@ -1175,74 +1171,50 @@ mod tests {
     fn boundary_closes_downward() {
         let square = square();
 
-        let (left, _) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
+        let (left, _) = boundary(Sign::Input, 0, &square);
         assert_eq!(left.basis_of(1, 0), &vec![1]);
         assert_eq!(left.faces_of(Sign::Input, 1, 0), &vec![0]);
         assert_eq!(left.faces_of(Sign::Output, 1, 0), &vec![1]);
     }
 
     #[test]
-    fn tight_arrow_hat_boundaries() {
-        let arrow = tight_arrow();
-
-        let (input, input_emb) = boundary(BoundaryMode::Hat, Sign::Input, 0, &arrow);
-        assert_eq!(input.sizes(), vec![1]);
-        assert_eq!(input_emb.map, vec![vec![0]]);
-
-        let (output, output_emb) = boundary(BoundaryMode::Hat, Sign::Output, 0, &arrow);
-        assert_eq!(output.sizes(), vec![1]);
-        assert_eq!(output_emb.map, vec![vec![1]]);
-    }
-
-    #[test]
-    fn two_direction_hat_boundaries_differ() {
+    fn empty_iterated_boundary_is_the_identity() {
         let square = square();
+        let (result, embedding) = iterated_boundary(&[], &square);
 
-        let (left, left_emb) = boundary(BoundaryMode::Hat, Sign::Input, 0, &square);
-        assert_eq!(left.sizes(), vec![2, 1]);
-        assert_eq!(left_emb.map, vec![vec![0, 2], vec![2]]);
-
-        let (bottom, bottom_emb) = boundary(BoundaryMode::Hat, Sign::Input, 1, &square);
-        assert_eq!(bottom.sizes(), vec![2, 1]);
-        assert_eq!(bottom_emb.map, vec![vec![0, 1], vec![0]]);
+        assert!(Arc::ptr_eq(&result, &square));
+        assert!(embedding.is_isomorphism());
+        assert_eq!(
+            embedding.map,
+            vec![vec![0, 1, 2, 3], vec![0, 1, 2, 3], vec![0]]
+        );
     }
 
     #[test]
-    fn hat_boundary_closes_downward() {
+    fn iterated_boundary_composes_each_step_into_the_original_shape() {
         let square = square();
+        let (first, first_into_square) = boundary(Sign::Input, 0, &square);
+        let (single, single_into_square) = iterated_boundary(&[(Sign::Input, 0)], &square);
+        assert!(FramedPoset::equal(&single, &first));
+        assert!(Embedding::equal(&single_into_square, &first_into_square));
 
-        let (left, _) = boundary(BoundaryMode::Hat, Sign::Input, 0, &square);
-        assert_eq!(left.basis_of(1, 0), &vec![1]);
-        assert_eq!(left.faces_of(Sign::Input, 1, 0), &vec![0]);
-        assert_eq!(left.faces_of(Sign::Output, 1, 0), &vec![1]);
+        let (expected, second_into_first) = boundary(Sign::Output, 1, &first);
+        let expected_embedding = Embedding::compose(&second_into_first, &first_into_square);
+
+        let (actual, actual_embedding) =
+            iterated_boundary(&[(Sign::Input, 0), (Sign::Output, 1)], &square);
+
+        assert!(FramedPoset::equal(&actual, &expected));
+        assert!(Embedding::equal(&actual_embedding, &expected_embedding));
     }
 
     #[test]
-    fn maximal_boundaries_agree_with_standard_square_boundaries() {
-        let square = square();
-
-        let (left, left_emb) = boundary(BoundaryMode::Maximal, Sign::Input, 0, &square);
-        assert_eq!(left.sizes(), vec![2, 1]);
-        assert_eq!(left_emb.map, vec![vec![0, 2], vec![2]]);
-
-        let (bottom, bottom_emb) = boundary(BoundaryMode::Maximal, Sign::Input, 1, &square);
-        assert_eq!(bottom.sizes(), vec![2, 1]);
-        assert_eq!(bottom_emb.map, vec![vec![0, 1], vec![0]]);
-    }
-
-    #[test]
-    fn maximal_boundary_excludes_nonmaximal_isolated_hat_seed() {
+    fn boundary_excludes_nonmaximal_orthogonal_seed() {
         let rectangle = subdivided_input_rectangle();
 
-        let (plain, plain_embedding) = boundary(BoundaryMode::Plain, Sign::Output, 0, &rectangle);
-        let (hat, _) = boundary(BoundaryMode::Hat, Sign::Output, 0, &rectangle);
-        let (maximal, maximal_embedding) =
-            boundary(BoundaryMode::Maximal, Sign::Output, 0, &rectangle);
+        let (output, output_embedding) = boundary(Sign::Output, 0, &rectangle);
 
-        assert_eq!(plain.sizes(), vec![2, 1]);
-        assert_eq!(hat.sizes(), vec![3, 1]);
-        assert_eq!(maximal.sizes(), vec![2, 1]);
-        assert_eq!(maximal_embedding.map, vec![vec![1, 4], vec![4]]);
-        assert!(Embedding::equal(&plain_embedding, &maximal_embedding));
+        assert_eq!(output.sizes(), vec![2, 1]);
+        assert_eq!(output_embedding.map, vec![vec![1, 4], vec![4]]);
     }
 }

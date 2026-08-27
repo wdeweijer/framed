@@ -555,7 +555,7 @@ fn escape_label(label: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use crate::poset::{BoundaryMode, boundary};
+    use crate::poset::boundary;
 
     use super::*;
 
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn renders_embedding_image_edges_distinct_from_endpoint_image() {
         let square = square();
-        let (_, embedding) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
+        let (_, embedding) = boundary(Sign::Input, 0, &square);
         let dot = embedding_to_dot(&embedding, Renderer::Ranked);
 
         assert!(dot.contains("digraph ofposet_embedding"));
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn renders_embedding_with_compass_spring_renderer() {
         let square = square();
-        let (_, embedding) = boundary(BoundaryMode::Plain, Sign::Input, 0, &square);
+        let (_, embedding) = boundary(Sign::Input, 0, &square);
         let dot = embedding_to_dot(&embedding, Renderer::CompassSpring);
 
         assert!(dot.contains("digraph ofposet_embedding"));

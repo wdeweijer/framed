@@ -8,8 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use ofposets::{
-    BoundaryMode, CubularityMode, FramedPoset, Sign, boundary, is_cubular, normalize,
-    orthogonal_product, shift,
+    CubularityMode, FramedPoset, Sign, boundary, is_cubular, normalize, orthogonal_product, shift,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{Rng, SeedableRng, TryRngCore};
@@ -108,7 +107,7 @@ fn main() -> io::Result<()> {
         ));
         let product = Arc::new(orthogonal_product(&left.shape, &right));
 
-        if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &product) {
+        if !is_cubular(CubularityMode::Strong, &product) {
             return Err(strong_cubularity_failure(
                 &options,
                 product_number,
@@ -230,7 +229,7 @@ fn validate_record(
     if !shape.is_connected() {
         return Err(invalid_line(path, line, "OFP is not connected"));
     }
-    if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &shape) {
+    if !is_cubular(CubularityMode::Strong, &shape) {
         return Err(invalid_line(path, line, "OFP is not strongly cubular"));
     }
 
@@ -271,7 +270,7 @@ fn validate_boundary_hash(
     stored: &str,
 ) -> io::Result<()> {
     let stored = parse_hash(path, line, stored)?;
-    let (boundary, _) = boundary(BoundaryMode::Hat, sign, direction, shape);
+    let (boundary, _) = boundary(sign, direction, shape);
     let actual = structural_hash(&normalize(&boundary));
     if actual != stored {
         return Err(invalid_line(

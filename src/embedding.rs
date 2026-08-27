@@ -46,6 +46,31 @@ pub struct EmbeddingUnion {
 }
 
 impl Embedding {
+    /// Construct an embedding from its forward map.
+    ///
+    /// The partial inverse is derived from `map`. As with
+    /// [`FramedPoset::from_faces`], validity of the supplied data is checked in
+    /// debug builds by the lower-level constructor.
+    pub fn from_map(dom: Arc<FramedPoset>, cod: Arc<FramedPoset>, map: Vec<Vec<usize>>) -> Self {
+        let mut inv: Vec<Vec<usize>> = cod
+            .sizes()
+            .into_iter()
+            .map(|size| vec![NO_PREIMAGE; size])
+            .collect();
+
+        for (dim, level) in map.iter().enumerate() {
+            for (dom_pos, &cod_pos) in level.iter().enumerate() {
+                debug_assert_eq!(
+                    inv[dim][cod_pos], NO_PREIMAGE,
+                    "an embedding map must be injective",
+                );
+                inv[dim][cod_pos] = dom_pos;
+            }
+        }
+
+        Self::make(dom, cod, map, inv)
+    }
+
     /// Construct an embedding from precomputed tables.
     pub fn make(
         dom: Arc<FramedPoset>,
@@ -62,24 +87,12 @@ impl Embedding {
     pub fn id(x: Arc<FramedPoset>) -> Self {
         let sizes = x.sizes();
         let map: Vec<Vec<usize>> = sizes.iter().map(|&n| (0..n).collect()).collect();
-        let inv = map.clone();
-        Self {
-            dom: Arc::clone(&x),
-            cod: x,
-            map,
-            inv,
-        }
+        Self::from_map(Arc::clone(&x), x, map)
     }
 
     /// The unique embedding from the empty poset into `cod`.
     pub fn empty(cod: Arc<FramedPoset>) -> Self {
-        let inv: Vec<Vec<usize>> = cod.sizes().iter().map(|&n| vec![NO_PREIMAGE; n]).collect();
-        Self {
-            dom: Arc::new(FramedPoset::empty()),
-            cod,
-            map: vec![],
-            inv,
-        }
+        Self::from_map(Arc::new(FramedPoset::empty()), cod, vec![])
     }
 
     /// True when the domain has no cells.
@@ -330,25 +343,8 @@ fn common_subobject_to_argument(subobject: &Embedding, argument: &Embedding) -> 
                 .collect()
         })
         .collect();
-    let mut inv: Vec<Vec<usize>> = argument
-        .dom
-        .sizes()
-        .iter()
-        .map(|&n| vec![NO_PREIMAGE; n])
-        .collect();
 
-    for (dim, row) in map.iter().enumerate() {
-        for (subobject_pos, &argument_pos) in row.iter().enumerate() {
-            inv[dim][argument_pos] = subobject_pos;
-        }
-    }
-
-    Embedding::make(
-        Arc::clone(&subobject.dom),
-        Arc::clone(&argument.dom),
-        map,
-        inv,
-    )
+    Embedding::from_map(Arc::clone(&subobject.dom), Arc::clone(&argument.dom), map)
 }
 
 fn argument_to_common_subobject(argument: &Embedding, subobject: &Embedding) -> Embedding {
@@ -366,25 +362,8 @@ fn argument_to_common_subobject(argument: &Embedding, subobject: &Embedding) -> 
                 .collect()
         })
         .collect();
-    let mut inv: Vec<Vec<usize>> = subobject
-        .dom
-        .sizes()
-        .iter()
-        .map(|&n| vec![NO_PREIMAGE; n])
-        .collect();
 
-    for (dim, row) in map.iter().enumerate() {
-        for (argument_pos, &subobject_pos) in row.iter().enumerate() {
-            inv[dim][subobject_pos] = argument_pos;
-        }
-    }
-
-    Embedding::make(
-        Arc::clone(&argument.dom),
-        Arc::clone(&subobject.dom),
-        map,
-        inv,
-    )
+    Embedding::from_map(Arc::clone(&argument.dom), Arc::clone(&subobject.dom), map)
 }
 
 fn image_cells(embedding: &Embedding) -> HashSet<(usize, usize)> {
@@ -428,7 +407,7 @@ fn image_edges(embedding: &Embedding) -> HashSet<(Sign, usize, usize, usize, usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::poset::{BoundaryMode, boundary};
+    use crate::poset::boundary;
 
     fn point() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::point())
@@ -489,19 +468,20 @@ mod tests {
     fn endpoint_embedding(endpoint: usize, cod: Arc<FramedPoset>) -> Embedding {
         let dom = point();
         let map = vec![vec![endpoint]];
-        let mut inv: Vec<Vec<usize>> = cod.sizes().iter().map(|&n| vec![NO_PREIMAGE; n]).collect();
-        inv[0][endpoint] = 0;
-        Embedding::make(dom, cod, map, inv)
+        Embedding::from_map(dom, cod, map)
     }
 
     fn bottom_edge_embedding(dom: Arc<FramedPoset>, cod: Arc<FramedPoset>) -> Embedding {
         let map = vec![vec![0, 1], vec![0]];
-        let inv = vec![
-            vec![0, 1, NO_PREIMAGE, NO_PREIMAGE],
-            vec![0, NO_PREIMAGE, NO_PREIMAGE, NO_PREIMAGE],
-            vec![NO_PREIMAGE],
-        ];
-        Embedding::make(dom, cod, map, inv)
+        Embedding::from_map(dom, cod, map)
+    }
+
+    #[test]
+    fn from_map_derives_the_partial_inverse() {
+        let embedding = Embedding::from_map(point(), arrow(), vec![vec![1]]);
+
+        assert_eq!(embedding.map, vec![vec![1]]);
+        assert_eq!(embedding.inv, vec![vec![NO_PREIMAGE, 0], vec![NO_PREIMAGE]],);
     }
 
     #[test]
@@ -642,8 +622,8 @@ mod tests {
     #[test]
     fn intersection_returns_maps_to_both_arguments() {
         let cod = square();
-        let (_, left) = boundary(BoundaryMode::Plain, Sign::Input, 0, &cod);
-        let (_, bottom) = boundary(BoundaryMode::Plain, Sign::Input, 1, &cod);
+        let (_, left) = boundary(Sign::Input, 0, &cod);
+        let (_, bottom) = boundary(Sign::Input, 1, &cod);
 
         let intersection = Embedding::intersection(&left, &bottom);
 
@@ -666,8 +646,8 @@ mod tests {
     #[test]
     fn union_returns_maps_from_both_arguments() {
         let cod = square();
-        let (_, left) = boundary(BoundaryMode::Plain, Sign::Input, 0, &cod);
-        let (_, bottom) = boundary(BoundaryMode::Plain, Sign::Input, 1, &cod);
+        let (_, left) = boundary(Sign::Input, 0, &cod);
+        let (_, bottom) = boundary(Sign::Input, 1, &cod);
 
         let union = Embedding::union(&left, &bottom);
 

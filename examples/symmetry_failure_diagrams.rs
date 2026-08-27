@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ofposets::{
-    BoundaryMode, Embedding, FramedPoset, Renderer, Sign, SignedPermutation, boundary,
-    embedding_to_dot, to_dot, transform, transform_embedding,
+    Embedding, FramedPoset, Renderer, Sign, SignedPermutation, boundary, embedding_to_dot, to_dot,
+    transform, transform_embedding,
 };
 
 const OUTPUT_DIR: &str = "visualizations/symmetry_failure_000004af538e4949";
@@ -19,7 +19,7 @@ fn main() -> io::Result<()> {
     let reflection = SignedPermutation::reflection(2, 0).expect("direction 0 exists");
     let reflected = transform(&source, &reflection).map_err(io::Error::other)?;
 
-    assert_hat_boundary_equivariant(&source, &reflected, &reflection);
+    assert_boundary_equivariant(&source, &reflected, &reflection);
 
     write_shape_and_boundaries(output_dir, "source", Arc::new(source))?;
     write_shape_and_boundaries(output_dir, "reflected_0", Arc::new(reflected))?;
@@ -28,7 +28,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn assert_hat_boundary_equivariant(
+fn assert_boundary_equivariant(
     source: &FramedPoset,
     transformed: &FramedPoset,
     symmetry: &SignedPermutation,
@@ -50,20 +50,15 @@ fn assert_hat_boundary_equivariant(
                 source_sign
             };
 
-            let (_, source_boundary) =
-                boundary(BoundaryMode::Hat, source_sign, source_direction, &source);
+            let (_, source_boundary) = boundary(source_sign, source_direction, &source);
             let transformed_boundary = transform_embedding(&source_boundary, symmetry)
                 .expect("the symmetry covers every direction in the boundary");
-            let (_, target_boundary) = boundary(
-                BoundaryMode::Hat,
-                target_sign,
-                direction_image.direction,
-                &transformed,
-            );
+            let (_, target_boundary) =
+                boundary(target_sign, direction_image.direction, &transformed);
 
             assert!(
                 Embedding::equal(&transformed_boundary, &target_boundary),
-                "the hat boundary is not equivariant for sign {source_sign:?} and direction {source_direction}"
+                "the boundary is not equivariant for sign {source_sign:?} and direction {source_direction}"
             );
         }
     }
@@ -88,7 +83,7 @@ fn write_shape_and_boundaries(
 
     for sign in [Sign::Input, Sign::Output] {
         for direction in 0..=1 {
-            let (_, emb) = boundary(BoundaryMode::Plain, sign, direction, &shape);
+            let (_, emb) = boundary(sign, direction, &shape);
             fs::write(
                 output_dir.join(format!(
                     "{name}_boundary_{}_{}.dot",

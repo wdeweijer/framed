@@ -7,8 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ofposets::{
-    BoundaryMode, CubularityMode, FramedPoset, RandomFramedPosetGenerator, Renderer, is_cubular,
-    to_dot,
+    CubularityMode, FramedPoset, RandomFramedPosetGenerator, Renderer, is_cubular, to_dot,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
@@ -71,7 +70,7 @@ fn main() -> io::Result<()> {
             );
             debug_assert_eq!(shape.dim(), frame_dimension as isize - 1);
 
-            if is_cubular(BoundaryMode::Maximal, CubularityMode::Strong, &shape) {
+            if is_cubular(CubularityMode::Strong, &shape) {
                 statistics.strongly_cubular.fetch_add(1, Ordering::Relaxed);
 
                 if shape.is_connected() {

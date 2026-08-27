@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::embedding::{Embedding, NO_PREIMAGE};
 use crate::intset::{self, IntSet};
 use crate::isomorphism::isomorphisms;
-use crate::poset::{BoundaryMode, FramedPoset, Sign, boundary};
+use crate::poset::{FramedPoset, Sign, boundary};
 
 /// Binary pushout result.
 #[derive(Debug, Clone)]
@@ -45,10 +45,8 @@ pub fn paste_along_boundary(
     second: &Arc<FramedPoset>,
     direction: usize,
 ) -> Pushout {
-    let (output_boundary, output_into_first) =
-        boundary(BoundaryMode::Plain, Sign::Output, direction, first);
-    let (input_boundary, input_into_second) =
-        boundary(BoundaryMode::Plain, Sign::Input, direction, second);
+    let (output_boundary, output_into_first) = boundary(Sign::Output, direction, first);
+    let (input_boundary, input_into_second) = boundary(Sign::Input, direction, second);
 
     let mut boundary_isomorphisms = isomorphisms(&output_boundary, &input_boundary);
     assert_eq!(

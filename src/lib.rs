@@ -28,7 +28,9 @@ pub use orthogonal::{
     orthogonal_product, orthogonal_product_associator, orthogonal_product_commutator,
     orthogonal_product_embedding,
 };
-pub use poset::{BoundaryMode, FramedPoset, FramedPosetSubset, Sign, boundary, closure, shift};
+pub use poset::{
+    FramedPoset, FramedPosetSubset, Sign, boundary, closure, iterated_boundary, shift,
+};
 pub use random::RandomFramedPosetGenerator;
 pub use symmetry::{
     DirectionImage, SignedPermutation, SymmetryError, transform, transform_embedding,

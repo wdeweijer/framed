@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ofposets::{BoundaryMode, CubularityMode, FramedPoset, is_cubular, normalize};
+use ofposets::{CubularityMode, FramedPoset, is_cubular, normalize};
 use serde::Deserialize;
 
 const BUFFER_CAPACITY: usize = 8 * 1024 * 1024;
@@ -118,7 +118,7 @@ fn filter_to_temporary(
         statistics.multiplicity += u128::from(record.multiplicity);
 
         let shape = Arc::new(record.ofp);
-        if is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &shape) {
+        if is_cubular(CubularityMode::Strong, &shape) {
             writer.write_all(line.as_bytes())?;
             if !line.ends_with('\n') {
                 writer.write_all(b"\n")?;
@@ -175,7 +175,7 @@ fn validate_record(
     if structural_hash(&normal) != hash {
         return Err(invalid_line(path, line, "stored hash is incorrect"));
     }
-    if !is_cubular(BoundaryMode::Hat, CubularityMode::Regular, &normal) {
+    if !is_cubular(CubularityMode::Regular, &normal) {
         return Err(invalid_line(
             path,
             line,

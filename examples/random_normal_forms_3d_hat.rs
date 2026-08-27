@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use ofposets::{BoundaryMode, CubularityMode, boundary};
+use ofposets::{CubularityMode, boundary};
 use ofposets::{
     DirectionImage, FramedPoset, RandomFramedPosetGenerator, Sign, SignedPermutation, is_cubular,
     normalize, transform,
@@ -282,7 +282,7 @@ fn sample_worker(seed: u64, context: WorkerContext<'_>) -> Result<(), String> {
         let shape = Arc::new(context.generator.generate(&mut rng));
         context.generated.fetch_add(1, Ordering::Relaxed);
 
-        if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &shape) {
+        if !is_cubular(CubularityMode::Strong, &shape) {
             continue;
         }
         context.strongly_cubular.fetch_add(1, Ordering::Relaxed);
@@ -415,7 +415,6 @@ fn analyze_orbit(
             .map_err(|error| format!("could not apply symmetry {symmetry:?}: {error}"))?;
         debug_assert!(transformed.is_connected());
         debug_assert!(is_cubular(
-            BoundaryMode::Hat,
             CubularityMode::Strong,
             &Arc::new(transformed.clone())
         ));
@@ -676,7 +675,7 @@ fn validate_representative(
     if !representative.is_connected() {
         return Err(io::Error::other("orbit representative is not connected"));
     }
-    if !is_cubular(BoundaryMode::Hat, CubularityMode::Strong, representative) {
+    if !is_cubular(CubularityMode::Strong, representative) {
         return Err(io::Error::other(
             "orbit representative is not strongly cubular",
         ));
@@ -684,7 +683,7 @@ fn validate_representative(
     Ok(())
 }
 
-/// Hash the normalized domains of the six directional hat boundaries.
+/// Hash the normalized domains of the six directional boundaries.
 fn boundary_hashes(shape: &Arc<FramedPoset>) -> [[u64; 2]; DIRECTION_COUNT] {
     std::array::from_fn(|direction| {
         [
@@ -695,7 +694,7 @@ fn boundary_hashes(shape: &Arc<FramedPoset>) -> [[u64; 2]; DIRECTION_COUNT] {
 }
 
 fn normalized_boundary_hash(shape: &Arc<FramedPoset>, sign: Sign, direction: usize) -> u64 {
-    let (boundary, _) = boundary(BoundaryMode::Hat, sign, direction, shape);
+    let (boundary, _) = boundary(sign, direction, shape);
     structural_hash(&normalize(&boundary))
 }
 

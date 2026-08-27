@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ofposets::{
-    BoundaryMode, Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, boundary, normalize,
+    Embedding, FramedPoset, RandomFramedPosetGenerator, Sign, iterated_boundary, normalize,
 };
 use rand::rngs::{OsRng, SmallRng};
 use rand::{SeedableRng, TryRngCore};
@@ -163,28 +163,10 @@ fn sample_worker(worker: usize, seed: u64, context: WorkerContext<'_>) {
 
 fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
     SIGN_PAIRS.into_iter().all(|(sign_0, sign_1)| {
-        let zero_then_one = iterated_boundary(shape, sign_0, 0, sign_1, 1);
-        let one_then_zero = iterated_boundary(shape, sign_1, 1, sign_0, 0);
+        let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
+        let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
         Embedding::equal(&zero_then_one, &one_then_zero)
     })
-}
-
-fn iterated_boundary(
-    shape: &Arc<FramedPoset>,
-    first_sign: Sign,
-    first_direction: usize,
-    second_sign: Sign,
-    second_direction: usize,
-) -> Embedding {
-    let (first_boundary, first_embedding) =
-        boundary(BoundaryMode::Plain, first_sign, first_direction, shape);
-    let (_, second_embedding) = boundary(
-        BoundaryMode::Plain,
-        second_sign,
-        second_direction,
-        &first_boundary,
-    );
-    Embedding::compose(&second_embedding, &first_embedding)
 }
 
 fn monitor(

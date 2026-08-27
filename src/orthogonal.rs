@@ -1,8 +1,9 @@
 //! Orthogonal products of oriented framed posets and embeddings.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::embedding::{Embedding, NO_PREIMAGE};
+use crate::embedding::Embedding;
 use crate::intset::{self, IntSet};
 use crate::poset::{FramedPoset, Sign};
 
@@ -21,8 +22,6 @@ pub fn orthogonal_product(left: &FramedPoset, right: &FramedPoset) -> FramedPose
 pub fn orthogonal_product_embedding(left: &Embedding, right: &Embedding) -> Embedding {
     let source = orthogonal_product_data(&left.dom, &right.dom);
     let target = orthogonal_product_data(&left.cod, &right.cod);
-    let left_cod_offsets = cell_offsets(&left.cod.sizes());
-    let right_cod_offsets = cell_offsets(&right.cod.sizes());
     let map = source
         .cells
         .iter()
@@ -30,17 +29,21 @@ pub fn orthogonal_product_embedding(left: &Embedding, right: &Embedding) -> Embe
             level
                 .iter()
                 .map(|cell| {
-                    let left_cod_pos = left.map[cell.left_dim][cell.left_pos];
-                    let right_cod_pos = right.map[cell.right_dim][cell.right_pos];
-                    let left_cod_id = left_cod_offsets[cell.left_dim] + left_cod_pos;
-                    let right_cod_id = right_cod_offsets[cell.right_dim] + right_cod_pos;
-                    target.pair_position(left_cod_id, right_cod_id)
+                    let left_image = Cell {
+                        dimension: cell.left.dimension,
+                        position: left.map[cell.left.dimension][cell.left.position],
+                    };
+                    let right_image = Cell {
+                        dimension: cell.right.dimension,
+                        position: right.map[cell.right.dimension][cell.right.position],
+                    };
+                    target.product_cell(left_image, right_image).position
                 })
                 .collect()
         })
         .collect();
 
-    product_embedding(source.shape, target.shape, map)
+    Embedding::from_map(Arc::new(source.shape), Arc::new(target.shape), map)
 }
 
 /// The commutativity isomorphism `left * right -> right * left`.
@@ -55,12 +58,12 @@ pub fn orthogonal_product_commutator(left: &FramedPoset, right: &FramedPoset) ->
         .map(|level| {
             level
                 .iter()
-                .map(|cell| backward.pair_position(cell.right_id, cell.left_id))
+                .map(|cell| backward.product_cell(cell.right, cell.left).position)
                 .collect()
         })
         .collect();
 
-    product_isomorphism(forward.shape, backward.shape, map)
+    Embedding::from_map(Arc::new(forward.shape), Arc::new(backward.shape), map)
 }
 
 /// The associativity isomorphism `(left * middle) * right -> left * (middle * right)`.
@@ -82,58 +85,46 @@ pub fn orthogonal_product_associator(
             level
                 .iter()
                 .map(|cell| {
-                    let left_middle_cell = left_middle.cells[cell.left_dim][cell.left_pos];
-                    let middle_right_dim = left_middle_cell.right_dim + cell.right_dim;
-                    let middle_right_pos =
-                        middle_right.pair_position(left_middle_cell.right_id, cell.right_id);
-                    let middle_right_id = middle_right.cell_id(middle_right_dim, middle_right_pos);
-                    target.pair_position(left_middle_cell.left_id, middle_right_id)
+                    let left_middle_cell =
+                        left_middle.cells[cell.left.dimension][cell.left.position];
+                    let middle_right_cell =
+                        middle_right.product_cell(left_middle_cell.right, cell.right);
+                    target
+                        .product_cell(left_middle_cell.left, middle_right_cell)
+                        .position
                 })
                 .collect()
         })
         .collect();
 
-    product_isomorphism(source.shape, target.shape, map)
+    Embedding::from_map(Arc::new(source.shape), Arc::new(target.shape), map)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct Cell {
+    dimension: usize,
+    position: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct OrthogonalProductCell {
-    left_dim: usize,
-    left_pos: usize,
-    left_id: usize,
-    right_dim: usize,
-    right_pos: usize,
-    right_id: usize,
+    left: Cell,
+    right: Cell,
 }
 
 struct OrthogonalProductData {
     shape: FramedPoset,
     cells: Vec<Vec<OrthogonalProductCell>>,
-    pair_positions: Vec<Option<usize>>,
-    right_count: usize,
-    offsets: Vec<usize>,
+    product_cells: HashMap<(Cell, Cell), Cell>,
 }
 
 impl OrthogonalProductData {
-    fn pair_position(&self, left_id: usize, right_id: usize) -> usize {
-        self.pair_positions[left_id * self.right_count + right_id]
+    fn product_cell(&self, left: Cell, right: Cell) -> Cell {
+        self.product_cells
+            .get(&(left, right))
+            .copied()
             .expect("the corresponding orthogonal product cell must exist")
     }
-
-    fn cell_id(&self, dim: usize, pos: usize) -> usize {
-        self.offsets[dim] + pos
-    }
-}
-
-fn cell_offsets(sizes: &[usize]) -> Vec<usize> {
-    let mut offsets = Vec::with_capacity(sizes.len() + 1);
-    let mut total = 0;
-    offsets.push(total);
-    for &size in sizes {
-        total += size;
-        offsets.push(total);
-    }
-    offsets
 }
 
 fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> OrthogonalProductData {
@@ -145,27 +136,23 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
         return OrthogonalProductData {
             shape: FramedPoset::empty(),
             cells: Vec::new(),
-            pair_positions: Vec::new(),
-            right_count,
-            offsets: vec![0],
+            product_cells: HashMap::new(),
         };
     }
 
-    let left_offsets = cell_offsets(&left_sizes);
-    let right_offsets = cell_offsets(&right_sizes);
-    let pair_count = left_count
-        .checked_mul(right_count)
-        .expect("orthogonal product has too many potential cell pairs");
     let level_count = left_sizes.len() + right_sizes.len() - 1;
-    let mut pair_positions = vec![None; pair_count];
+    let mut cell_pairs = HashMap::new();
     let mut basis = vec![Vec::new(); level_count];
     let mut product_cells = vec![Vec::new(); level_count];
 
-    for left_dim in 0..left_sizes.len() {
-        for left_pos in 0..left_sizes[left_dim] {
-            let left_id = left_offsets[left_dim] + left_pos;
-            for right_dim in 0..right_sizes.len() {
-                for right_pos in 0..right_sizes[right_dim] {
+    for (left_dim, &left_size) in left_sizes.iter().enumerate() {
+        for left_pos in 0..left_size {
+            let left_cell = Cell {
+                dimension: left_dim,
+                position: left_pos,
+            };
+            for (right_dim, &right_size) in right_sizes.iter().enumerate() {
+                for right_pos in 0..right_size {
                     if !intset::is_disjoint(
                         left.basis_of(left_dim, left_pos),
                         right.basis_of(right_dim, right_pos),
@@ -173,21 +160,27 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
                         continue;
                     }
 
-                    let right_id = right_offsets[right_dim] + right_pos;
+                    let right_cell = Cell {
+                        dimension: right_dim,
+                        position: right_pos,
+                    };
                     let dim = left_dim + right_dim;
                     let pos = basis[dim].len();
-                    pair_positions[left_id * right_count + right_id] = Some(pos);
+                    let previous = cell_pairs.insert(
+                        (left_cell, right_cell),
+                        Cell {
+                            dimension: dim,
+                            position: pos,
+                        },
+                    );
+                    debug_assert!(previous.is_none());
                     basis[dim].push(intset::union(
                         left.basis_of(left_dim, left_pos),
                         right.basis_of(right_dim, right_pos),
                     ));
                     product_cells[dim].push(OrthogonalProductCell {
-                        left_dim,
-                        left_pos,
-                        left_id,
-                        right_dim,
-                        right_pos,
-                        right_id,
+                        left: left_cell,
+                        right: right_cell,
                     });
                 }
             }
@@ -210,26 +203,40 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
             for sign in [Sign::Input, Sign::Output] {
                 let mut faces = Vec::new();
 
-                if cell.left_dim > 0 {
+                if cell.left.dimension > 0 {
                     faces.extend(
-                        left.faces_of(sign, cell.left_dim, cell.left_pos)
+                        left.faces_of(sign, cell.left.dimension, cell.left.position)
                             .iter()
                             .map(|&face| {
-                                let left_face_id = left_offsets[cell.left_dim - 1] + face;
-                                pair_positions[left_face_id * right_count + cell.right_id]
+                                cell_pairs
+                                    .get(&(
+                                        Cell {
+                                            dimension: cell.left.dimension - 1,
+                                            position: face,
+                                        },
+                                        cell.right,
+                                    ))
                                     .expect("a face of a disjoint pair must remain disjoint")
+                                    .position
                             }),
                     );
                 }
-                if cell.right_dim > 0 {
+                if cell.right.dimension > 0 {
                     faces.extend(
                         right
-                            .faces_of(sign, cell.right_dim, cell.right_pos)
+                            .faces_of(sign, cell.right.dimension, cell.right.position)
                             .iter()
                             .map(|&face| {
-                                let right_face_id = right_offsets[cell.right_dim - 1] + face;
-                                pair_positions[cell.left_id * right_count + right_face_id]
+                                cell_pairs
+                                    .get(&(
+                                        cell.left,
+                                        Cell {
+                                            dimension: cell.right.dimension - 1,
+                                            position: face,
+                                        },
+                                    ))
                                     .expect("a face of a disjoint pair must remain disjoint")
+                                    .position
                             }),
                     );
                 }
@@ -245,38 +252,11 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
 
     let product = FramedPoset::from_faces(basis, faces_in, faces_out);
     debug_assert!(product.well_formed());
-    let offsets = cell_offsets(&product.sizes());
     OrthogonalProductData {
         shape: product,
         cells: product_cells,
-        pair_positions,
-        right_count,
-        offsets,
+        product_cells: cell_pairs,
     }
-}
-
-fn product_isomorphism(dom: FramedPoset, cod: FramedPoset, map: Vec<Vec<usize>>) -> Embedding {
-    let embedding = product_embedding(dom, cod, map);
-    debug_assert!(embedding.is_isomorphism());
-    embedding
-}
-
-fn product_embedding(dom: FramedPoset, cod: FramedPoset, map: Vec<Vec<usize>>) -> Embedding {
-    debug_assert_eq!(map.iter().map(Vec::len).collect::<Vec<_>>(), dom.sizes());
-    let mut inv: Vec<Vec<usize>> = cod
-        .sizes()
-        .into_iter()
-        .map(|size| vec![NO_PREIMAGE; size])
-        .collect();
-
-    for (dim, level) in map.iter().enumerate() {
-        for (dom_pos, &cod_pos) in level.iter().enumerate() {
-            debug_assert_eq!(inv[dim][cod_pos], NO_PREIMAGE);
-            inv[dim][cod_pos] = dom_pos;
-        }
-    }
-
-    Embedding::make(Arc::new(dom), Arc::new(cod), map, inv)
 }
 
 #[cfg(test)]

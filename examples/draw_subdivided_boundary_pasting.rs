@@ -4,9 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ofposets::pushout::{Pushout, paste_along_boundary};
-use ofposets::{
-    BoundaryMode, Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, to_dot,
-};
+use ofposets::{Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, to_dot};
 
 const OUTPUT_DIR: &str = "visualizations/subdivided_boundary_pasting";
 
@@ -16,46 +14,21 @@ fn main() -> io::Result<()> {
     assert_eq!(stacked_squares.tip.sizes(), vec![6, 7, 2]);
 
     let rectangle = subdivided_input_rectangle();
-    let (rectangle_input, _) = boundary(BoundaryMode::Plain, Sign::Input, 0, &rectangle);
-    let (rectangle_output, rectangle_output_embedding) =
-        boundary(BoundaryMode::Plain, Sign::Output, 0, &rectangle);
-    let (rectangle_hat_output, rectangle_hat_output_embedding) =
-        boundary(BoundaryMode::Hat, Sign::Output, 0, &rectangle);
-    let (rectangle_maximal_output, rectangle_maximal_output_embedding) =
-        boundary(BoundaryMode::Maximal, Sign::Output, 0, &rectangle);
+    let (rectangle_input, _) = boundary(Sign::Input, 0, &rectangle);
+    let (rectangle_output, rectangle_output_embedding) = boundary(Sign::Output, 0, &rectangle);
     assert_eq!(rectangle_input.sizes(), vec![3, 2]);
     assert_eq!(rectangle_output.sizes(), vec![2, 1]);
-    assert_eq!(rectangle_hat_output.sizes(), vec![3, 1]);
-    assert_eq!(rectangle_maximal_output.sizes(), vec![2, 1]);
-    assert!(Embedding::equal(
-        &rectangle_output_embedding,
-        &rectangle_maximal_output_embedding,
-    ));
 
-    let (stacked_output, _) = boundary(BoundaryMode::Plain, Sign::Output, 0, &stacked_squares.tip);
+    let (stacked_output, _) = boundary(Sign::Output, 0, &stacked_squares.tip);
     assert_eq!(stacked_output.sizes(), vec![3, 2]);
 
     let pasted = paste_along_boundary(&stacked_squares.tip, &rectangle, 0);
     assert_eq!(pasted.tip.sizes(), vec![8, 10, 3]);
 
     let expected_output_in_pasted = Embedding::compose(&rectangle_output_embedding, &pasted.inr);
-    let (_, pasted_output) = boundary(BoundaryMode::Plain, Sign::Output, 0, &pasted.tip);
+    let (_, pasted_output) = boundary(Sign::Output, 0, &pasted.tip);
     assert!(Embedding::equal(&expected_output_in_pasted, &pasted_output));
-    let expected_maximal_output_in_pasted =
-        Embedding::compose(&rectangle_maximal_output_embedding, &pasted.inr);
-    let (_, pasted_maximal_output) = boundary(BoundaryMode::Maximal, Sign::Output, 0, &pasted.tip);
-    assert!(Embedding::equal(
-        &expected_maximal_output_in_pasted,
-        &pasted_maximal_output,
-    ));
-    write_diagrams(
-        &stacked_squares,
-        &rectangle,
-        &pasted,
-        &pasted_output,
-        &rectangle_hat_output_embedding,
-        &pasted_maximal_output,
-    )?;
+    write_diagrams(&stacked_squares, &rectangle, &pasted, &pasted_output)?;
 
     println!(
         "pasted shape sizes {:?}; 0-output boundary sizes {:?}",
@@ -113,8 +86,6 @@ fn write_diagrams(
     rectangle: &Arc<FramedPoset>,
     pasted: &Pushout,
     rectangle_output: &Embedding,
-    rectangle_hat_output: &Embedding,
-    pasted_maximal_output: &Embedding,
 ) -> io::Result<()> {
     let output_dir = Path::new(OUTPUT_DIR);
     fs::create_dir_all(output_dir)?;
@@ -124,21 +95,7 @@ fn write_diagrams(
     write_shape(output_dir, "pasted", &pasted.tip)?;
     write_embedding(output_dir, "pasted_stacked_squares", &pasted.inl)?;
     write_embedding(output_dir, "pasted_single_cell_rectangle", &pasted.inr)?;
-    write_embedding(
-        output_dir,
-        "pasted_plain_0_output_boundary",
-        rectangle_output,
-    )?;
-    write_embedding(
-        output_dir,
-        "rectangle_hat_0_output_boundary",
-        rectangle_hat_output,
-    )?;
-    write_embedding(
-        output_dir,
-        "pasted_maximal_0_output_boundary",
-        pasted_maximal_output,
-    )?;
+    write_embedding(output_dir, "pasted_0_output_boundary", rectangle_output)?;
     Ok(())
 }
 

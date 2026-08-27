@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::embedding::Embedding;
-use crate::poset::{BoundaryMode, FramedPoset, Sign, boundary};
+use crate::poset::{FramedPoset, Sign, boundary};
 
 /// Strength of the cubularity condition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,18 +15,14 @@ pub enum CubularityMode {
     Strong,
 }
 
-/// Test cubularity using the selected boundary definition and strength.
+/// Test cubularity using the selected strength.
 ///
 /// Regular cubularity requires every ordering of distinct directional
 /// boundaries to agree. Strong cubularity requires, at every iterated boundary,
 /// both orders of two further boundaries to equal their intersection. Thus
-/// strong cubularity implies regular cubularity for the same `boundary_mode`.
-pub fn is_cubular(
-    boundary_mode: BoundaryMode,
-    cubularity_mode: CubularityMode,
-    shape: &Arc<FramedPoset>,
-) -> bool {
-    check_all_boundary_states(shape, boundary_mode, cubularity_mode)
+/// strong cubularity implies regular cubularity.
+pub fn is_cubular(cubularity_mode: CubularityMode, shape: &Arc<FramedPoset>) -> bool {
+    check_all_boundary_states(shape, cubularity_mode)
 }
 
 struct Boundary {
@@ -36,19 +32,13 @@ struct Boundary {
 
 #[derive(Debug, Clone, Copy)]
 struct CheckContext {
-    boundary_mode: BoundaryMode,
     cubularity_mode: CubularityMode,
     trace: bool,
 }
 
-fn check_all_boundary_states(
-    shape: &Arc<FramedPoset>,
-    boundary_mode: BoundaryMode,
-    cubularity_mode: CubularityMode,
-) -> bool {
+fn check_all_boundary_states(shape: &Arc<FramedPoset>, cubularity_mode: CubularityMode) -> bool {
     let directions = shape.active_directions();
     let context = CheckContext {
-        boundary_mode,
         cubularity_mode,
         trace: std::env::var_os("OFP_CUBULARITY_TRACE").is_some(),
     };
@@ -57,7 +47,7 @@ fn check_all_boundary_states(
 
     if context.trace {
         eprintln!(
-            "[cubularity] start {cubularity_mode:?} with {boundary_mode:?} boundaries: directions={directions:?}, cells={:?}",
+            "[cubularity] start {cubularity_mode:?}: directions={directions:?}, cells={:?}",
             shape.sizes()
         );
     }
@@ -72,9 +62,7 @@ fn check_all_boundary_states(
     );
 
     if context.trace {
-        eprintln!(
-            "[cubularity] finish {cubularity_mode:?} with {boundary_mode:?} boundaries: {result}"
-        );
+        eprintln!("[cubularity] finish {cubularity_mode:?}: {result}");
     }
     result
 }
@@ -131,7 +119,7 @@ fn check_states(
                 directions[next]
             );
         }
-        let (boundary, _) = boundary(context.boundary_mode, sign, directions[next], shape);
+        let (boundary, _) = boundary(sign, directions[next], shape);
         boundary_word.push((sign, directions[next]));
         if context.trace {
             eprintln!(
@@ -179,7 +167,7 @@ fn check_last_two(
         .iter()
         .map(|&direction| {
             [Sign::Input, Sign::Output].map(|sign| {
-                let (domain, into_parent) = boundary(context.boundary_mode, sign, direction, shape);
+                let (domain, into_parent) = boundary(sign, direction, shape);
                 Boundary {
                     domain,
                     into_parent,
@@ -207,18 +195,10 @@ fn check_last_two(
                     let beta_sign = [Sign::Input, Sign::Output][beta];
                     let alpha_boundary = &boundaries[left][alpha];
                     let beta_boundary = &boundaries[right][beta];
-                    let alpha_after_beta = boundary_after(
-                        context.boundary_mode,
-                        beta_boundary,
-                        alpha_sign,
-                        directions[left],
-                    );
-                    let beta_after_alpha = boundary_after(
-                        context.boundary_mode,
-                        alpha_boundary,
-                        beta_sign,
-                        directions[right],
-                    );
+                    let alpha_after_beta =
+                        boundary_after(beta_boundary, alpha_sign, directions[left]);
+                    let beta_after_alpha =
+                        boundary_after(alpha_boundary, beta_sign, directions[right]);
 
                     let equal = match context.cubularity_mode {
                         CubularityMode::Regular => {
@@ -277,14 +257,8 @@ fn check_last_two(
     true
 }
 
-fn boundary_after(
-    boundary_mode: BoundaryMode,
-    first: &Boundary,
-    second_sign: Sign,
-    second_direction: usize,
-) -> Embedding {
-    let (_, second_into_first) =
-        boundary(boundary_mode, second_sign, second_direction, &first.domain);
+fn boundary_after(first: &Boundary, second_sign: Sign, second_direction: usize) -> Embedding {
+    let (_, second_into_first) = boundary(second_sign, second_direction, &first.domain);
     Embedding::compose(&second_into_first, &first.into_parent)
 }
 
@@ -336,9 +310,17 @@ mod tests {
 
     fn weakly_but_not_strongly_cubular() -> Arc<FramedPoset> {
         Arc::new(FramedPoset::from_faces(
-            vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
-            vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![]]],
-            vec![vec![vec![]], vec![vec![], vec![]], vec![vec![0, 1]]],
+            vec![
+                vec![vec![]],
+                vec![vec![0], vec![0], vec![1]],
+                vec![vec![0, 1]],
+            ],
+            vec![vec![vec![]], vec![vec![], vec![0], vec![0]], vec![vec![]]],
+            vec![
+                vec![vec![]],
+                vec![vec![0], vec![], vec![]],
+                vec![vec![1, 2]],
+            ],
         ))
     }
 
@@ -451,7 +433,6 @@ mod tests {
             &directions,
             &[],
             CheckContext {
-                boundary_mode: BoundaryMode::Hat,
                 cubularity_mode: CubularityMode::Regular,
                 trace: false,
             },
@@ -461,29 +442,15 @@ mod tests {
     #[test]
     fn standard_square_is_strongly_cubular() {
         let shape = square();
-        for boundary_mode in [
-            BoundaryMode::Plain,
-            BoundaryMode::Hat,
-            BoundaryMode::Maximal,
-        ] {
-            assert!(is_cubular(boundary_mode, CubularityMode::Strong, &shape));
-            assert!(is_cubular(boundary_mode, CubularityMode::Regular, &shape));
-        }
+        assert!(is_cubular(CubularityMode::Strong, &shape));
+        assert!(is_cubular(CubularityMode::Regular, &shape));
     }
 
     #[test]
     fn strong_cubularity_is_stricter_than_cubularity() {
         let shape = weakly_but_not_strongly_cubular();
-        assert!(is_cubular(
-            BoundaryMode::Hat,
-            CubularityMode::Regular,
-            &shape
-        ));
-        assert!(!is_cubular(
-            BoundaryMode::Hat,
-            CubularityMode::Strong,
-            &shape
-        ));
+        assert!(is_cubular(CubularityMode::Regular, &shape));
+        assert!(!is_cubular(CubularityMode::Strong, &shape));
     }
 
     #[test]
@@ -493,13 +460,7 @@ mod tests {
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![1]]],
         ));
-        for boundary_mode in [
-            BoundaryMode::Plain,
-            BoundaryMode::Hat,
-            BoundaryMode::Maximal,
-        ] {
-            assert!(is_cubular(boundary_mode, CubularityMode::Strong, &arrow));
-        }
+        assert!(is_cubular(CubularityMode::Strong, &arrow));
     }
 
     #[test]
@@ -510,7 +471,7 @@ mod tests {
             non_cubular_two_dimensional(),
         ] {
             assert_eq!(
-                is_cubular(BoundaryMode::Hat, CubularityMode::Regular, &shape),
+                is_cubular(CubularityMode::Regular, &shape),
                 is_top_level_cubular(&shape)
             );
         }
@@ -519,31 +480,19 @@ mod tests {
     #[test]
     fn standard_three_cube_and_all_its_boundaries_are_strongly_cubular() {
         let cube = cube(3);
-        assert!(is_cubular(BoundaryMode::Hat, CubularityMode::Strong, &cube));
+        assert!(is_cubular(CubularityMode::Strong, &cube));
 
         for direction in 0..3 {
             for sign in [Sign::Input, Sign::Output] {
-                let (boundary, _) = boundary(BoundaryMode::Hat, sign, direction, &cube);
-                assert!(is_cubular(
-                    BoundaryMode::Hat,
-                    CubularityMode::Strong,
-                    &boundary
-                ));
-                assert!(is_cubular(
-                    BoundaryMode::Hat,
-                    CubularityMode::Regular,
-                    &boundary
-                ));
+                let (boundary, _) = boundary(sign, direction, &cube);
+                assert!(is_cubular(CubularityMode::Strong, &boundary));
+                assert!(is_cubular(CubularityMode::Regular, &boundary));
             }
         }
     }
 
     #[test]
     fn standard_three_cube_is_cubular() {
-        assert!(is_cubular(
-            BoundaryMode::Hat,
-            CubularityMode::Regular,
-            &cube(3)
-        ));
+        assert!(is_cubular(CubularityMode::Regular, &cube(3)));
     }
 }

@@ -4,11 +4,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ofposets::{
-    BoundaryMode, DirectionImage, Embedding, FramedPoset, Renderer, Sign, SignedPermutation,
-    boundary, embedding_to_dot, to_dot, transform, transform_embedding,
+    DirectionImage, Embedding, FramedPoset, Renderer, Sign, SignedPermutation, boundary,
+    embedding_to_dot, to_dot, transform, transform_embedding,
 };
 
-const OUTPUT_DIR: &str = "visualizations/smallest_plain_boundary_equivariance_failure";
+const OUTPUT_DIR: &str = "visualizations/smallest_boundary_equivariance_failure";
 
 struct Failure {
     shape_code: usize,
@@ -37,10 +37,10 @@ fn main() -> io::Result<()> {
             break;
         }
     }
-    let failure = failure
-        .ok_or_else(|| io::Error::other("all 16 minimal two-dimensional OFPs were equivariant"))?;
-
-    verify_hat_boundary_is_equivariant(&failure)?;
+    let Some(failure) = failure else {
+        println!("all enumerated OFPs with at most 4 cells were boundary-equivariant");
+        return Ok(());
+    };
     write_failure(&failure)?;
 
     println!("smallest counterexample has 4 cells");
@@ -55,7 +55,7 @@ fn main() -> io::Result<()> {
         failure.target_direction,
     );
     println!(
-        "plain boundary sizes: source {:?}, transformed source {:?}, direct target {:?}",
+        "boundary sizes: source {:?}, transformed source {:?}, direct target {:?}",
         failure.source_boundary.dom.sizes(),
         failure.transformed_boundary.dom.sizes(),
         failure.target_boundary.dom.sizes(),
@@ -96,7 +96,7 @@ fn find_failure(
         .into_iter()
         .flat_map(|sign| {
             (0..dimension).map(move |direction| {
-                let (_, embedding) = boundary(BoundaryMode::Plain, sign, direction, shape);
+                let (_, embedding) = boundary(sign, direction, shape);
                 (sign, direction, embedding)
             })
         })
@@ -116,12 +116,7 @@ fn find_failure(
             };
             let transformed_boundary =
                 transform_embedding(source_boundary, symmetry).map_err(io::Error::other)?;
-            let (_, target_boundary) = boundary(
-                BoundaryMode::Plain,
-                target_sign,
-                image.direction,
-                &transformed,
-            );
+            let (_, target_boundary) = boundary(target_sign, image.direction, &transformed);
 
             if !Embedding::equal(&transformed_boundary, &target_boundary) {
                 return Ok(Some(Failure {
@@ -293,26 +288,6 @@ fn two_dimensional_symmetries() -> Vec<SignedPermutation> {
         }
     }
     symmetries
-}
-
-fn verify_hat_boundary_is_equivariant(failure: &Failure) -> io::Result<()> {
-    let (_, source_boundary) = boundary(
-        BoundaryMode::Hat,
-        failure.source_sign,
-        failure.source_direction,
-        &failure.source,
-    );
-    let transformed_boundary =
-        transform_embedding(&source_boundary, &failure.symmetry).map_err(io::Error::other)?;
-    let (_, target_boundary) = boundary(
-        BoundaryMode::Hat,
-        failure.target_sign,
-        failure.target_direction,
-        &failure.transformed,
-    );
-    Embedding::equal(&transformed_boundary, &target_boundary)
-        .then_some(())
-        .ok_or_else(|| io::Error::other("hat boundary unexpectedly failed equivariance"))
 }
 
 fn write_failure(failure: &Failure) -> io::Result<()> {
