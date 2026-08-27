@@ -202,7 +202,8 @@ fn check_last_two(
 
                     let equal = match context.cubularity_mode {
                         CubularityMode::Regular => {
-                            let equal = Embedding::equal(&alpha_after_beta, &beta_after_alpha);
+                            let equal =
+                                Embedding::same_subobject(&alpha_after_beta, &beta_after_alpha);
                             if context.trace {
                                 eprintln!(
                                     "[cubularity]   commute ({alpha_sign:?}, {}) after \
@@ -224,8 +225,10 @@ fn check_last_two(
                                 &beta_boundary.into_parent,
                             )
                             .into_codomain;
-                            let alpha_equal = Embedding::equal(&alpha_after_beta, &intersection);
-                            let beta_equal = Embedding::equal(&beta_after_alpha, &intersection);
+                            let alpha_equal =
+                                Embedding::same_subobject(&alpha_after_beta, &intersection);
+                            let beta_equal =
+                                Embedding::same_subobject(&beta_after_alpha, &intersection);
                             if context.trace {
                                 eprintln!(
                                     "[cubularity]   strong ({alpha_sign:?}, {}) / \

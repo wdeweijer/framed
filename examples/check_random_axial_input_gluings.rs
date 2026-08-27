@@ -102,7 +102,7 @@ fn main() -> io::Result<()> {
 
             let (_, actual) = boundary(Sign::Input, class.direction, &pasted.tip);
             let expected = Embedding::compose(&input_into_first, &pasted.inl);
-            let holds = Embedding::equal(&actual, &expected);
+            let holds = Embedding::same_subobject(&actual, &expected);
 
             gluing_count += 1;
             if !holds {
@@ -313,7 +313,7 @@ fn write_failure(
     let (_, actual) = boundary(Sign::Input, class.direction, &pasted.tip);
     let (_, input_into_first) = boundary(Sign::Input, class.direction, first);
     let expected = Embedding::compose(&input_into_first, &pasted.inl);
-    debug_assert!(!Embedding::equal(&actual, &expected));
+    debug_assert!(!Embedding::same_subobject(&actual, &expected));
 
     write_shape(output_dir, "first_shape", first)?;
     write_shape(output_dir, "second_shape", second)?;

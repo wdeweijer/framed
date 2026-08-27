@@ -100,7 +100,7 @@ fn search_worker(
 
         for (sign_0, sign_1) in SIGN_PAIRS {
             let (iterated, intersection) = boundary_intersection_embeddings(&shape, sign_0, sign_1);
-            if Embedding::equal(&iterated, &intersection) {
+            if Embedding::same_subobject(&iterated, &intersection) {
                 continue;
             }
 
@@ -134,7 +134,7 @@ fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
         let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
         let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
 
-        if !Embedding::equal(&zero_then_one, &one_then_zero) {
+        if !Embedding::same_subobject(&zero_then_one, &one_then_zero) {
             return false;
         }
     }
@@ -252,7 +252,7 @@ mod tests {
         for (sign_0, sign_1) in SIGN_PAIRS {
             let (iterated, intersection) =
                 boundary_intersection_embeddings(&square, sign_0, sign_1);
-            assert!(Embedding::equal(&iterated, &intersection));
+            assert!(Embedding::same_subobject(&iterated, &intersection));
 
             let iterated_subset = FramedPosetSubset::from_embedding(&iterated);
             let intersection_subset = FramedPosetSubset::from_embedding(&intersection);

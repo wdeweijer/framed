@@ -57,7 +57,7 @@ fn assert_boundary_equivariant(
                 boundary(target_sign, direction_image.direction, &transformed);
 
             assert!(
-                Embedding::equal(&transformed_boundary, &target_boundary),
+                Embedding::same_subobject(&transformed_boundary, &target_boundary),
                 "the boundary is not equivariant for sign {source_sign:?} and direction {source_direction}"
             );
         }

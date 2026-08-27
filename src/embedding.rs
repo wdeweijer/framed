@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::intset;
-use crate::poset::{FramedPoset, FramedPosetSubset, Sign, closure};
+use crate::poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
 
 /// Sentinel stored in inverse maps when a codomain cell has no preimage.
 pub const NO_PREIMAGE: usize = usize::MAX;
@@ -124,6 +124,45 @@ impl Embedding {
         )
     }
 
+    /// Restrict this isomorphism to corresponding signed directional boundaries.
+    ///
+    /// If `f: A -> B` is this isomorphism and the two boundary inclusions are
+    /// `i_A: boundary(A) -> A` and `i_B: boundary(B) -> B`, the result is the
+    /// isomorphism `i_B^-1 f i_A`.
+    pub fn boundary_isomorphism(&self, sign: Sign, direction: usize) -> Self {
+        debug_assert!(self.is_isomorphism());
+
+        let (dom_boundary, into_dom) = boundary(sign, direction, &self.dom);
+        let (cod_boundary, into_cod) = boundary(sign, direction, &self.cod);
+        let into_original_cod = Self::compose(&into_dom, self);
+        let map = into_original_cod
+            .map
+            .iter()
+            .enumerate()
+            .map(|(dim, level)| {
+                level
+                    .iter()
+                    .map(|&cod_pos| {
+                        let boundary_pos = into_cod.inv[dim][cod_pos];
+                        debug_assert_ne!(
+                            boundary_pos, NO_PREIMAGE,
+                            "an isomorphism must preserve directional boundaries",
+                        );
+                        boundary_pos
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let restricted = Self::from_map(dom_boundary, cod_boundary, map);
+        debug_assert!(restricted.is_isomorphism());
+        debug_assert!(Self::equal_as_morphisms(
+            &Self::compose(&restricted, &into_cod),
+            &into_original_cod,
+        ));
+        restricted
+    }
+
     /// Compose `f: A -> B` with `g: B -> C`, returning `g f: A -> C`.
     ///
     /// The middle framed posets are compared structurally, not by pointer
@@ -200,10 +239,19 @@ impl Embedding {
     /// The codomains are compared structurally, but the domains are not.
     /// Instead, two embeddings are equal when they have the same image cells
     /// and the same signed image cover relations in that codomain.
-    pub fn equal(a: &Self, b: &Self) -> bool {
+    pub fn same_subobject(a: &Self, b: &Self) -> bool {
         FramedPoset::equal(&a.cod, &b.cod)
             && image_cells(a) == image_cells(b)
             && image_edges(a) == image_edges(b)
+    }
+
+    /// Equality as morphisms between structurally equal framed posets.
+    ///
+    /// Unlike [`Self::same_subobject`], this distinguishes different maps with
+    /// the same image. The inverse tables need not be compared because they are
+    /// determined by the forward maps.
+    pub fn equal_as_morphisms(a: &Self, b: &Self) -> bool {
+        FramedPoset::equal(&a.dom, &b.dom) && FramedPoset::equal(&a.cod, &b.cod) && a.map == b.map
     }
 
     /// True when the image is an induced downward sub-poset of the codomain.
@@ -485,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_compares_images_not_domain_presentations() {
+    fn same_subobject_compares_images_not_domain_presentations() {
         let cod = arrow();
         let id = Embedding::id(Arc::clone(&cod));
         let reversed = reversed_arrow();
@@ -494,7 +542,24 @@ mod tests {
         let reversed_embedding = Embedding::make(reversed, cod, reversed_map, reversed_inv);
 
         assert!(!FramedPoset::equal(&id.dom, &reversed_embedding.dom));
-        assert!(Embedding::equal(&id, &reversed_embedding));
+        assert!(Embedding::same_subobject(&id, &reversed_embedding));
+    }
+
+    #[test]
+    fn morphism_equality_distinguishes_automorphisms_with_the_same_image() {
+        let shape = Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![]]],
+            vec![vec![vec![], vec![]]],
+            vec![vec![vec![], vec![]]],
+        ));
+        let identity = Embedding::id(Arc::clone(&shape));
+        let swap = Embedding::from_map(Arc::clone(&shape), shape, vec![vec![1, 0]]);
+
+        assert!(identity.is_isomorphism());
+        assert!(swap.is_isomorphism());
+        assert!(Embedding::same_subobject(&identity, &swap));
+        assert!(!Embedding::equal_as_morphisms(&identity, &swap));
+        assert!(Embedding::equal_as_morphisms(&identity, &identity));
     }
 
     #[test]
@@ -564,7 +629,33 @@ mod tests {
     }
 
     #[test]
-    fn equal_sees_signed_image_edges() {
+    fn boundary_isomorphism_restricts_the_ambient_isomorphism() {
+        let dom = arrow();
+        let cod = reversed_arrow();
+        let isomorphism = Embedding::make(
+            Arc::clone(&dom),
+            Arc::clone(&cod),
+            vec![vec![1, 0], vec![0]],
+            vec![vec![1, 0], vec![0]],
+        );
+
+        for (sign, expected_codomain_vertex) in [(Sign::Input, 1), (Sign::Output, 0)] {
+            let restricted = isomorphism.boundary_isomorphism(sign, 0);
+            let (_, into_dom) = boundary(sign, 0, &dom);
+            let (_, into_cod) = boundary(sign, 0, &cod);
+
+            assert!(restricted.is_isomorphism());
+            assert_eq!(restricted.map, vec![vec![0]]);
+            assert_eq!(into_cod.map, vec![vec![expected_codomain_vertex]]);
+            assert_eq!(
+                Embedding::compose(&restricted, &into_cod).map,
+                Embedding::compose(&into_dom, &isomorphism).map,
+            );
+        }
+    }
+
+    #[test]
+    fn same_subobject_sees_signed_image_edges() {
         let cod = arrow();
         let id = Embedding::id(Arc::clone(&cod));
         let same_cells = Embedding::make(
@@ -575,15 +666,15 @@ mod tests {
         );
 
         assert_eq!(image_cells(&id), image_cells(&same_cells));
-        assert!(!Embedding::equal(&id, &same_cells));
+        assert!(!Embedding::same_subobject(&id, &same_cells));
     }
 
     #[test]
-    fn equal_rejects_different_codomains() {
+    fn same_subobject_rejects_different_codomains() {
         let into_arrow = endpoint_embedding(0, arrow());
         let into_square = endpoint_embedding(0, square());
 
-        assert!(!Embedding::equal(&into_arrow, &into_square));
+        assert!(!Embedding::same_subobject(&into_arrow, &into_square));
     }
 
     #[test]
@@ -633,11 +724,11 @@ mod tests {
         assert!(intersection.into_codomain.is_closed());
         assert!(intersection.into_left.is_closed());
         assert!(intersection.into_right.is_closed());
-        assert!(Embedding::equal(
+        assert!(Embedding::same_subobject(
             &Embedding::compose(&intersection.into_left, &left),
             &intersection.into_codomain,
         ));
-        assert!(Embedding::equal(
+        assert!(Embedding::same_subobject(
             &Embedding::compose(&intersection.into_right, &bottom),
             &intersection.into_codomain,
         ));
@@ -657,11 +748,11 @@ mod tests {
         assert!(union.into_codomain.is_closed());
         assert!(union.left_into_union.is_closed());
         assert!(union.right_into_union.is_closed());
-        assert!(Embedding::equal(
+        assert!(Embedding::same_subobject(
             &Embedding::compose(&union.left_into_union, &union.into_codomain),
             &left,
         ));
-        assert!(Embedding::equal(
+        assert!(Embedding::same_subobject(
             &Embedding::compose(&union.right_into_union, &union.into_codomain),
             &bottom,
         ));

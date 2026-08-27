@@ -74,7 +74,7 @@ fn check_equivariance(
             let (_, target_boundary) =
                 boundary(target_sign, direction_image.direction, &transformed_shape);
 
-            if !Embedding::equal(&transformed_boundary, &target_boundary) {
+            if !Embedding::same_subobject(&transformed_boundary, &target_boundary) {
                 return Err(equivariance_failure(
                     seed,
                     sample,

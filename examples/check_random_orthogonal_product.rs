@@ -305,11 +305,7 @@ fn check_morphism_equality(
     sample: u64,
     tuple: &RandomTuple,
 ) -> io::Result<()> {
-    if left.is_isomorphism()
-        && right.is_isomorphism()
-        && FramedPoset::equal(&left.dom, &right.dom)
-        && FramedPoset::equal(&left.cod, &right.cod)
-        && left.map == right.map
+    if left.is_isomorphism() && right.is_isomorphism() && Embedding::equal_as_morphisms(left, right)
     {
         Ok(())
     } else {

@@ -670,7 +670,7 @@ fn compare_boundary_with_side(
     let expected_closed = expected.is_closed();
     debug_assert!(actual_closed);
     debug_assert!(expected_closed);
-    actual_closed && expected_closed && Embedding::equal(&actual, &expected)
+    actual_closed && expected_closed && Embedding::same_subobject(&actual, &expected)
 }
 
 fn compare_boundary_with_union(
@@ -698,7 +698,7 @@ fn compare_boundary_with_union(
         return false;
     }
     let expected = Embedding::union(&first_boundary, &second_boundary).into_codomain;
-    Embedding::equal(&actual, &expected)
+    Embedding::same_subobject(&actual, &expected)
 }
 
 fn print_statistics(statistics: FormulaStatistics) {
@@ -1157,7 +1157,7 @@ fn is_basic_two_dimensional_cubular(shape: &Arc<FramedPoset>) -> bool {
     SIGN_PAIRS.into_iter().all(|(sign_0, sign_1)| {
         let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
         let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
-        Embedding::equal(&zero_then_one, &one_then_zero)
+        Embedding::same_subobject(&zero_then_one, &one_then_zero)
     })
 }
 

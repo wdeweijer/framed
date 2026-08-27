@@ -1037,7 +1037,7 @@ mod tests {
 
         assert_eq!(closed.sizes(), vec![2, 1]);
         assert!(embedding.is_closed());
-        assert!(Embedding::equal(&embedding, &Embedding::id(arrow)));
+        assert!(Embedding::same_subobject(&embedding, &Embedding::id(arrow)));
     }
 
     #[test]
@@ -1050,7 +1050,7 @@ mod tests {
 
         assert!(original.is_closed());
         assert!(closed.is_closed());
-        assert!(Embedding::equal(&closed, &original));
+        assert!(Embedding::same_subobject(&closed, &original));
     }
 
     #[test]
@@ -1196,7 +1196,10 @@ mod tests {
         let (first, first_into_square) = boundary(Sign::Input, 0, &square);
         let (single, single_into_square) = iterated_boundary(&[(Sign::Input, 0)], &square);
         assert!(FramedPoset::equal(&single, &first));
-        assert!(Embedding::equal(&single_into_square, &first_into_square));
+        assert!(Embedding::same_subobject(
+            &single_into_square,
+            &first_into_square
+        ));
 
         let (expected, second_into_first) = boundary(Sign::Output, 1, &first);
         let expected_embedding = Embedding::compose(&second_into_first, &first_into_square);
@@ -1205,7 +1208,10 @@ mod tests {
             iterated_boundary(&[(Sign::Input, 0), (Sign::Output, 1)], &square);
 
         assert!(FramedPoset::equal(&actual, &expected));
-        assert!(Embedding::equal(&actual_embedding, &expected_embedding));
+        assert!(Embedding::same_subobject(
+            &actual_embedding,
+            &expected_embedding
+        ));
     }
 
     #[test]

@@ -630,7 +630,8 @@ fn compare_boundary_with_side(
     let (_, actual) = boundary(sign, direction, pasted);
     let (_, into_side) = boundary(sign, direction, side.shape);
     let expected = Embedding::compose(&into_side, side.into_pasted);
-    let holds = actual.is_closed() && expected.is_closed() && Embedding::equal(&actual, &expected);
+    let holds =
+        actual.is_closed() && expected.is_closed() && Embedding::same_subobject(&actual, &expected);
 
     EquationCheck {
         kind: EquationKind::Axial,
@@ -664,7 +665,7 @@ fn compare_boundary_with_union(
     let holds = actual.is_closed()
         && expected
             .as_ref()
-            .is_some_and(|expected| Embedding::equal(&actual, expected));
+            .is_some_and(|expected| Embedding::same_subobject(&actual, expected));
 
     EquationCheck {
         kind: EquationKind::Transverse,

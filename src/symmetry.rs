@@ -465,7 +465,10 @@ mod tests {
 
         assert!(source_boundary.dom.sizes().is_empty());
         assert!(target_boundary.dom.sizes().is_empty());
-        assert!(Embedding::equal(&transformed_boundary, &target_boundary));
+        assert!(Embedding::same_subobject(
+            &transformed_boundary,
+            &target_boundary
+        ));
     }
 
     #[test]

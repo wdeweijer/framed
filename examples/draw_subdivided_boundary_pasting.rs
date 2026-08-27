@@ -27,7 +27,10 @@ fn main() -> io::Result<()> {
 
     let expected_output_in_pasted = Embedding::compose(&rectangle_output_embedding, &pasted.inr);
     let (_, pasted_output) = boundary(Sign::Output, 0, &pasted.tip);
-    assert!(Embedding::equal(&expected_output_in_pasted, &pasted_output));
+    assert!(Embedding::same_subobject(
+        &expected_output_in_pasted,
+        &pasted_output
+    ));
     write_diagrams(&stacked_squares, &rectangle, &pasted, &pasted_output)?;
 
     println!(

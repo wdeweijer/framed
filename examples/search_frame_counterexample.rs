@@ -189,11 +189,11 @@ fn check_state(shape: &Arc<FramedPoset>, directions: &[usize]) -> usize {
                         Embedding::compose(&beta_into_alpha, &alpha_into_shape);
                     let intersection =
                         Embedding::intersection(&alpha_into_shape, &beta_into_shape).into_codomain;
-                    failures += usize::from(!Embedding::equal(
+                    failures += usize::from(!Embedding::same_subobject(
                         &alpha_after_beta,
                         &intersection,
                     ));
-                    failures += usize::from(!Embedding::equal(
+                    failures += usize::from(!Embedding::same_subobject(
                         &beta_after_alpha,
                         &intersection,
                     ));

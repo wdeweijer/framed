@@ -118,7 +118,7 @@ fn find_failure(
                 transform_embedding(source_boundary, symmetry).map_err(io::Error::other)?;
             let (_, target_boundary) = boundary(target_sign, image.direction, &transformed);
 
-            if !Embedding::equal(&transformed_boundary, &target_boundary) {
+            if !Embedding::same_subobject(&transformed_boundary, &target_boundary) {
                 return Ok(Some(Failure {
                     shape_code,
                     symmetry_index,

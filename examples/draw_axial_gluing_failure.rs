@@ -76,11 +76,11 @@ fn main() -> io::Result<()> {
         "first_symmetry": "identity",
         "second_symmetry": "reflection in direction 0",
         "boundary_isomorphism_map": failure.boundary_isomorphism.map,
-        "input_boundaries_equal": Embedding::equal(
+        "input_boundaries_equal": Embedding::same_subobject(
             &failure.actual_input,
             &failure.expected_input,
         ),
-        "output_boundaries_equal": Embedding::equal(
+        "output_boundaries_equal": Embedding::same_subobject(
             &failure.actual_output,
             &failure.expected_output,
         ),
@@ -134,8 +134,8 @@ fn reconstruct_failure() -> io::Result<AxialFailure> {
     assert!(expected_input.is_closed());
     assert!(actual_output.is_closed());
     assert!(expected_output.is_closed());
-    assert!(!Embedding::equal(&actual_input, &expected_input));
-    assert!(!Embedding::equal(&actual_output, &expected_output));
+    assert!(!Embedding::same_subobject(&actual_input, &expected_input));
+    assert!(!Embedding::same_subobject(&actual_output, &expected_output));
     assert_transverse_equations(&first, &second, &pasted);
 
     Ok(AxialFailure {
@@ -164,7 +164,7 @@ fn assert_transverse_equations(
         let first_boundary = Embedding::compose(&first_boundary, &pasted.inl);
         let second_boundary = Embedding::compose(&second_boundary, &pasted.inr);
         let expected = Embedding::union(&first_boundary, &second_boundary).into_codomain;
-        assert!(Embedding::equal(&actual, &expected));
+        assert!(Embedding::same_subobject(&actual, &expected));
     }
 }
 

@@ -62,7 +62,7 @@ fn main() -> io::Result<()> {
         if state.word.len() >= 2 {
             let intersection = direct_boundary_intersection(&source, &state.word);
             assert!(
-                Embedding::equal(&state.into_source, &intersection),
+                Embedding::same_subobject(&state.into_source, &intersection),
                 "iterated boundary {label} differs from its direct-boundary intersection"
             );
             write_embedding_layouts(output_dir, &format!("{label}_intersection"), &intersection)?;

@@ -142,7 +142,7 @@ fn is_cubular(shape: &Arc<FramedPoset>) -> bool {
     SIGN_PAIRS.into_iter().all(|(sign_0, sign_1)| {
         let (boundary_0_after_1, boundary_1_after_0, _) =
             boundary_comparison(shape, sign_0, sign_1);
-        Embedding::equal(&boundary_0_after_1, &boundary_1_after_0)
+        Embedding::same_subobject(&boundary_0_after_1, &boundary_1_after_0)
     })
 }
 

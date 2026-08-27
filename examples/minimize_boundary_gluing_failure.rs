@@ -252,7 +252,7 @@ fn cubularity_failure(shape: &Arc<FramedPoset>) -> Option<CubularityFailure> {
     SIGN_PAIRS.into_iter().find_map(|(sign_0, sign_1)| {
         let (_, zero_then_one) = iterated_boundary(&[(sign_0, 0), (sign_1, 1)], shape);
         let (_, one_then_zero) = iterated_boundary(&[(sign_1, 1), (sign_0, 0)], shape);
-        (!Embedding::equal(&zero_then_one, &one_then_zero)).then_some(CubularityFailure {
+        (!Embedding::same_subobject(&zero_then_one, &one_then_zero)).then_some(CubularityFailure {
             sign_0,
             sign_1,
             zero_then_one,

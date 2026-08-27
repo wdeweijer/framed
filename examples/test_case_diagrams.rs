@@ -89,11 +89,11 @@ fn main() -> std::io::Result<()> {
         &minus_0_union_minus_1.right_into_union,
     );
 
-    assert!(Embedding::equal(
+    assert!(Embedding::same_subobject(
         &minus_0_minus_1_composite,
         &minus_1_minus_0_composite
     ));
-    assert!(Embedding::equal(
+    assert!(Embedding::same_subobject(
         &intersection_into_union_via_minus_0,
         &intersection_into_union_via_minus_1
     ));
@@ -139,7 +139,7 @@ fn main() -> std::io::Result<()> {
         &four_minus_0_intersection_minus_1.into_right,
         &four_minus_0_union_minus_1.right_into_union,
     );
-    assert!(Embedding::equal(
+    assert!(Embedding::same_subobject(
         &four_intersection_into_union_via_minus_0,
         &four_intersection_into_union_via_minus_1
     ));
