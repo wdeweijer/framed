@@ -101,11 +101,10 @@ pub fn normalize(shape: &FramedPoset) -> FramedPoset {
 
 /// Test whether two framed posets are isomorphic.
 pub fn isomorphic(a: &FramedPoset, b: &FramedPoset) -> bool {
-    match (a.is_normal(), b.is_normal()) {
-        (true, true) => FramedPoset::equal(a, b),
-        (true, false) => FramedPoset::equal(a, &normalize(b)),
-        (false, true) => FramedPoset::equal(&normalize(a), b),
-        (false, false) => FramedPoset::equal(&normalize(a), &normalize(b)),
+    if a.is_normal() && b.is_normal() {
+        FramedPoset::equal(a, b)
+    } else {
+        vf2_isomorphic(a, b)
     }
 }
 
@@ -506,5 +505,21 @@ mod tests {
                 assert_eq!(isomorphic(a, b), vf2_isomorphic(a, b));
             }
         }
+    }
+
+    #[test]
+    fn boolean_isomorphism_rejects_unequal_disjoint_components_directly() {
+        let small: FramedPoset = serde_json::from_str(
+            r#"{"version":1,"basis":[[[],[],[],[]],[[1]]],"faces_in":[[[],[],[],[]],[[1,3]]],"faces_out":[[[],[],[],[]],[[]]]}"#,
+        )
+        .unwrap();
+        let large: FramedPoset = serde_json::from_str(
+            r#"{"version":1,"basis":[[[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]],[[1],[1],[1],[1]]],"faces_in":[[[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]],[[4,12],[5,13],[6,14],[7,15]]],"faces_out":[[[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]],[[],[],[],[]]]}"#,
+        )
+        .unwrap();
+
+        assert!(!small.is_normal());
+        assert!(!large.is_normal());
+        assert!(!isomorphic(&small, &large));
     }
 }
