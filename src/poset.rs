@@ -13,7 +13,7 @@ use crate::intset::{self, IntSet};
 const SERIALIZATION_VERSION: usize = 1;
 
 /// Input/output polarity for oriented cover relations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Sign {
     Input,
     Output,

@@ -10,6 +10,7 @@ pub mod compass_spring_nd;
 pub mod cubularity;
 pub mod dot;
 pub mod embedding;
+pub mod enumeration;
 pub mod intset;
 pub mod isomorphism;
 pub mod orthogonal;
@@ -20,7 +21,7 @@ pub mod symmetry;
 pub mod volumetric;
 
 pub use box_construction::{
-    BoxConstruction, BoxFace, BoxFaceEmbedding, BoxGluing, box_construction, elementary_cylinder,
+    BoxConstruction, BoxFaces, BoxGluing, SignedPair, box_construction, elementary_cylinder,
     rigid_box_construction,
 };
 pub use cubularity::{CubularityMode, is_cubular};
