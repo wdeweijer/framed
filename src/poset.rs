@@ -19,6 +19,13 @@ pub enum Sign {
     Output,
 }
 
+/// The level and position of an element within a framed poset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Element {
+    pub dim: usize,
+    pub pos: usize,
+}
+
 impl Sign {
     pub(crate) fn opposite(self) -> Self {
         match self {
@@ -394,6 +401,11 @@ impl FramedPoset {
         &self.basis[dim][pos]
     }
 
+    /// Basis of an indexed element.
+    pub fn basis_of_element(&self, element: Element) -> &IntSet {
+        self.basis_of(element.dim, element.pos)
+    }
+
     /// Signed faces of a cell.
     pub fn faces_of(&self, sign: Sign, dim: usize, pos: usize) -> &IntSet {
         match sign {
@@ -435,25 +447,25 @@ impl FramedPoset {
             .collect()
     }
 
-    /// Whether this finite poset has a greatest element.
+    /// The greatest element of this finite poset, if it exists.
     ///
     /// A finite poset has a greatest element exactly when it has a unique
     /// maximal element.
-    pub fn has_greatest_element(&self) -> bool {
-        let mut found_maximal = false;
+    pub fn greatest_element(&self) -> Option<Element> {
+        let mut greatest = None;
 
         for dim in 0..self.basis.len() {
             for pos in 0..self.basis[dim].len() {
                 if self.cofaces_in[dim][pos].is_empty() && self.cofaces_out[dim][pos].is_empty() {
-                    if found_maximal {
-                        return false;
+                    if greatest.is_some() {
+                        return None;
                     }
-                    found_maximal = true;
+                    greatest = Some(Element { dim, pos });
                 }
             }
         }
 
-        found_maximal
+        greatest
     }
 
     /// Render this poset's Hasse diagram as Graphviz DOT.
@@ -927,12 +939,21 @@ mod tests {
             vec![vec![vec![], vec![], vec![]], vec![vec![1], vec![2]]],
         );
 
-        assert!(!FramedPoset::empty().has_greatest_element());
-        assert!(FramedPoset::point().has_greatest_element());
-        assert!(tight_arrow().has_greatest_element());
-        assert!(square().has_greatest_element());
+        assert_eq!(FramedPoset::empty().greatest_element(), None);
+        assert_eq!(
+            FramedPoset::point().greatest_element(),
+            Some(Element { dim: 0, pos: 0 }),
+        );
+        assert_eq!(
+            tight_arrow().greatest_element(),
+            Some(Element { dim: 1, pos: 0 }),
+        );
+        assert_eq!(
+            square().greatest_element(),
+            Some(Element { dim: 2, pos: 0 }),
+        );
         assert!(two_arrow_path.is_connected());
-        assert!(!two_arrow_path.has_greatest_element());
+        assert_eq!(two_arrow_path.greatest_element(), None);
     }
 
     #[test]

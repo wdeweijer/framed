@@ -10,11 +10,11 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::box_construction::elementary_cylinder;
 use crate::embedding::Embedding;
 use crate::intset::{self, IntSet};
 use crate::isomorphism::{isomorphic, isomorphisms, normalize};
-use crate::poset::{FramedPoset, Sign, boundary, shift};
+use crate::polyvoxel::{cylinder, point, shift};
+use crate::poset::{FramedPoset, Sign, boundary};
 use crate::pushout::pushout;
 use crate::volumetric::is_volumetric;
 
@@ -147,11 +147,7 @@ pub fn enumerate_polyvoxels_with_progress(
     );
 
     let mut builder = CatalogBuilder::new(max_cells, allowed_directions.to_vec());
-    builder.record(
-        Arc::new(FramedPoset::point()),
-        true,
-        PolyvoxelFactorization::Point,
-    );
+    builder.record(point(), true, PolyvoxelFactorization::Point);
 
     loop {
         let shapes: Vec<_> = builder
@@ -178,7 +174,7 @@ pub fn enumerate_polyvoxels_with_progress(
         );
         for (job, &source) in voxels.iter().enumerate() {
             changed |= builder.record(
-                Arc::new(shift(&shapes[source])),
+                shift(&shapes[source]),
                 true,
                 PolyvoxelFactorization::Shift { source },
             );
@@ -205,7 +201,7 @@ pub fn enumerate_polyvoxels_with_progress(
         for &input in &voxels {
             for output in 0..shapes.len() {
                 if cylinder_is_defined(&shapes[input], &shapes[output]) {
-                    let cylinder = elementary_cylinder(&shapes[input], &shapes[output]);
+                    let cylinder = cylinder(&shapes[input], &shapes[output]);
                     changed |= builder.record(
                         cylinder,
                         true,
@@ -527,12 +523,10 @@ mod tests {
         factorization: &PolyvoxelFactorization,
     ) -> Arc<FramedPoset> {
         match factorization {
-            PolyvoxelFactorization::Point => Arc::new(FramedPoset::point()),
-            PolyvoxelFactorization::Shift { source } => {
-                Arc::new(shift(&catalog.entry(*source).shape))
-            }
+            PolyvoxelFactorization::Point => point(),
+            PolyvoxelFactorization::Shift { source } => shift(&catalog.entry(*source).shape),
             PolyvoxelFactorization::Cylinder { input, output } => {
-                elementary_cylinder(&catalog.entry(*input).shape, &catalog.entry(*output).shape)
+                cylinder(&catalog.entry(*input).shape, &catalog.entry(*output).shape)
             }
             PolyvoxelFactorization::Paste {
                 direction,

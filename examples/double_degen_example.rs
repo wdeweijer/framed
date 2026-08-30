@@ -1,38 +1,43 @@
+use ofposets::{Renderer, to_dot};
+use ofposets::polyvoxel::*;
 use std::{fs, io};
-use std::sync::Arc;
-use ofposets::pushout::paste_along_boundary;
-use ofposets::*;
 
-#[allow(unused_variables)]
 fn main() -> io::Result<()> {
-    let p = Arc::new(FramedPoset::point());
-    let e = elementary_cylinder(&p,&p);
-    let t = elementary_cylinder(&e, &p);
-    let prism = elementary_cylinder(&t, &t);
-    let t2 = Arc::new(shift(&t));
-    let u1 = elementary_cylinder(&prism, &t2);
-    
-    let square = elementary_cylinder(&e, &e);
-    let e2 = Arc::new(shift(&e));
-    let u2 = elementary_cylinder(&square, &e2);
+    let p = point();
+    let e = cylinder(&p, &p);
+    let t = cylinder(&e, &p);
+    let prism = cylinder(&t, &t);
+    let t2 = shift(&t);
+    let u1 = cylinder(&prism, &t2);
 
-    let u = paste_along_boundary(&u1, &u2, 2).tip;
+    let square = cylinder(&e, &e);
+    let e2 = shift(&e);
+    let u2 = cylinder(&square, &e2);
 
-    let v1 = elementary_cylinder(&t2, &t2);
-    let v2 = elementary_cylinder(&e2, &e2);
+    let u = paste(&u1, &u2, 2).tip;
 
-    let v = paste_along_boundary(&v1, &v2, 2).tip;
+    let v1 = cylinder(&t2, &t2);
+    let v2 = cylinder(&e2, &e2);
 
-    let w = paste_along_boundary(&u, &v, 0).tip;
+    let v_pasting = paste(&v1, &v2, 2);
+    let v2_into_v = v_pasting.inr;
+    let v = v_pasting.tip;
 
-    // println!("{}",serde_json::to_string(w.as_ref())?);
-    // println!("{:?}", v1.active_directions());
-    // println!("{:?}", w.active_directions());
+    let w_pasting = paste(&u, &v, 0);
+    let v_into_w = w_pasting.inr;
+    let w = w_pasting.tip;
+
+    let witness = v2.greatest_element().expect("v2 must be a voxel");
+    let witness = v2_into_v.apply(witness);
+    let witness = v_into_w.apply(witness);
+    let witness_basis = w.basis_of_element(witness);
+    assert!(w.maximal(witness.dim).contains(&witness.pos));
+    assert!(witness_basis.len() + 1 < w.active_directions().len());
+
+    println!("{}", serde_json::to_string(w.as_ref())?);
+    println!("{:?}", witness_basis);
+    println!("{:?}", w.active_directions());
     // fs::write("visualizations/double_degen_example.dot", to_dot(&w, Renderer::CompassSpring))?;
-
-
-    let ee = paste_along_boundary(&e, &e, 0).tip;
-    let huh = elementary_cylinder(&ee, &ee);
 
     Ok(())
 }

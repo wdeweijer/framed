@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::intset;
-use crate::poset::{FramedPoset, FramedPosetSubset, Sign, boundary, closure};
+use crate::poset::{Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure};
 
 /// Sentinel stored in inverse maps when a codomain cell has no preimage.
 pub const NO_PREIMAGE: usize = usize::MAX;
@@ -122,6 +122,14 @@ impl Embedding {
             self.inv.clone(),
             self.map.clone(),
         )
+    }
+
+    /// Apply this embedding to an element of its domain.
+    pub fn apply(&self, element: Element) -> Element {
+        Element {
+            dim: element.dim,
+            pos: self.map[element.dim][element.pos],
+        }
     }
 
     /// Restrict this isomorphism to corresponding signed directional boundaries.
@@ -530,6 +538,10 @@ mod tests {
 
         assert_eq!(embedding.map, vec![vec![1]]);
         assert_eq!(embedding.inv, vec![vec![NO_PREIMAGE, 0], vec![NO_PREIMAGE]],);
+        assert_eq!(
+            embedding.apply(Element { dim: 0, pos: 0 }),
+            Element { dim: 0, pos: 1 },
+        );
     }
 
     #[test]

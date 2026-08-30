@@ -14,6 +14,7 @@ pub mod enumeration;
 pub mod intset;
 pub mod isomorphism;
 pub mod orthogonal;
+pub mod polyvoxel;
 pub mod poset;
 pub mod pushout;
 pub mod random;
@@ -36,7 +37,7 @@ pub use orthogonal::{
     orthogonal_product_embedding,
 };
 pub use poset::{
-    FramedPoset, FramedPosetSubset, Sign, boundary, closure, iterated_boundary, shift,
+    Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure, iterated_boundary, shift,
 };
 pub use random::RandomFramedPosetGenerator;
 pub use symmetry::{
