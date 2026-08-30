@@ -1,4 +1,7 @@
 //! Convenient constructors for polyvoxels.
+//!
+//! Except for [`point`], these functions assume that every input shape is
+//! already known to be a polyvoxel.
 
 use std::sync::Arc;
 
@@ -11,12 +14,17 @@ pub fn point() -> Arc<FramedPoset> {
     Arc::new(FramedPoset::point())
 }
 
-/// Shift every direction by one and return the result as a shared shape.
+/// Shift every direction of a polyvoxel by one and return the result as a
+/// shared shape.
+///
+/// This assumes that `shape` is a polyvoxel.
 pub fn shift(shape: &Arc<FramedPoset>) -> Arc<FramedPoset> {
     Arc::new(shift_poset(shape))
 }
 
 /// Construct an elementary cylinder with a voxel as its input.
+///
+/// This assumes that both `input` and `output` are polyvoxels.
 ///
 /// This checks that `input` has a greatest element. For a shape already known
 /// to be a polyvoxel, this is equivalent to being a voxel.
@@ -29,6 +37,8 @@ pub fn cylinder(input: &Arc<FramedPoset>, output: &Arc<FramedPoset>) -> Arc<Fram
 }
 
 /// Paste the output boundary of `left` to the input boundary of `right`.
+///
+/// This assumes that both `left` and `right` are polyvoxels.
 ///
 /// The returned pushout retains both canonical embeddings into the result.
 pub fn paste(left: &Arc<FramedPoset>, right: &Arc<FramedPoset>, direction: usize) -> Pushout {
