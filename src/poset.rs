@@ -435,6 +435,27 @@ impl FramedPoset {
             .collect()
     }
 
+    /// Whether this finite poset has a greatest element.
+    ///
+    /// A finite poset has a greatest element exactly when it has a unique
+    /// maximal element.
+    pub fn has_greatest_element(&self) -> bool {
+        let mut found_maximal = false;
+
+        for dim in 0..self.basis.len() {
+            for pos in 0..self.basis[dim].len() {
+                if self.cofaces_in[dim][pos].is_empty() && self.cofaces_out[dim][pos].is_empty() {
+                    if found_maximal {
+                        return false;
+                    }
+                    found_maximal = true;
+                }
+            }
+        }
+
+        found_maximal
+    }
+
     /// Render this poset's Hasse diagram as Graphviz DOT.
     pub fn to_dot(&self, renderer: crate::dot::Renderer) -> String {
         crate::dot::to_dot(self, renderer)
@@ -896,6 +917,22 @@ mod tests {
         );
 
         assert!(!disconnected.is_connected());
+    }
+
+    #[test]
+    fn greatest_element_is_the_unique_maximal_cell() {
+        let two_arrow_path = FramedPoset::from_faces(
+            vec![vec![vec![], vec![], vec![]], vec![vec![0], vec![0]]],
+            vec![vec![vec![], vec![], vec![]], vec![vec![0], vec![1]]],
+            vec![vec![vec![], vec![], vec![]], vec![vec![1], vec![2]]],
+        );
+
+        assert!(!FramedPoset::empty().has_greatest_element());
+        assert!(FramedPoset::point().has_greatest_element());
+        assert!(tight_arrow().has_greatest_element());
+        assert!(square().has_greatest_element());
+        assert!(two_arrow_path.is_connected());
+        assert!(!two_arrow_path.has_greatest_element());
     }
 
     #[test]
