@@ -76,6 +76,9 @@ pub struct Edge {
     pub head: usize,
     pub tail_port: Option<AxisPort>,
     pub head_port: Option<AxisPort>,
+    /// Whether this edge joins a point (empty basis) to a line
+    /// (one-element basis), so it uses the one-dimensional coefficients.
+    pub one_dimensional: bool,
 }
 
 /// A graph to lay out in `dim` dimensions: `node_count` nodes, indexed
@@ -91,7 +94,14 @@ pub struct Graph {
 #[derive(Clone, Copy, Debug)]
 pub struct SimParams {
     pub edge_length: f64,
-    pub spring_k: f64,
+    pub one_d_compression_k: f64,
+    pub one_d_extension_k: f64,
+    pub other_compression_k: f64,
+    pub other_extension_k: f64,
+    pub one_d_angle_k: f64,
+    pub one_d_angle_force: f64,
+    pub other_angle_k: f64,
+    pub other_angle_force: f64,
     pub repulsion: f64,
     pub damping: f64,
     pub center_k: f64,
@@ -110,13 +120,93 @@ impl Default for SimParams {
     fn default() -> Self {
         SimParams {
             edge_length: 100.0,
-            spring_k: 0.06,
+            one_d_compression_k: 0.06,
+            one_d_extension_k: 0.01,
+            other_compression_k: 0.01,
+            other_extension_k: 0.01,
+            one_d_angle_k: 0.06,
+            one_d_angle_force: 0.1,
+            other_angle_k: 0.01,
+            other_angle_force: 0.0,
             repulsion: 3500.0,
-            damping: 0.70,
-            center_k: 0.004,
+            damping: 0.5,
+            center_k: 0.001,
             steps: 1000,
         }
     }
+}
+
+fn spring_length_stiffness(stretch: f64, one_dimensional: bool, params: &SimParams) -> f64 {
+    match (one_dimensional, stretch < 0.0) {
+        (true, true) => params.one_d_compression_k,
+        (true, false) => params.one_d_extension_k,
+        (false, true) => params.other_compression_k,
+        (false, false) => params.other_extension_k,
+    }
+}
+
+fn spring_angle_stiffness(one_dimensional: bool, params: &SimParams) -> f64 {
+    if one_dimensional {
+        params.one_d_angle_k
+    } else {
+        params.other_angle_k
+    }
+}
+
+fn spring_constant_angle_force(one_dimensional: bool, params: &SimParams) -> f64 {
+    if one_dimensional {
+        params.one_d_angle_force
+    } else {
+        params.other_angle_force
+    }
+}
+
+/// The signed Euclidean-length error for one edge. Negative stretch uses the
+/// compression coefficient and positive stretch uses the extension coefficient.
+fn spring_length_error(
+    actual: &[f64],
+    fallback_direction: &[f64],
+    one_dimensional: bool,
+    params: &SimParams,
+) -> Vec<f64> {
+    let distance = vector::length(actual);
+    let direction = if distance > 1e-6 {
+        vector::scale(actual, 1.0 / distance)
+    } else {
+        fallback_direction.to_vec()
+    };
+    let stretch = distance - params.edge_length;
+    let stiffness = spring_length_stiffness(stretch, one_dimensional, params);
+    vector::scale(&direction, stiffness * stretch)
+}
+
+/// The tangential force error that rotates an edge toward one endpoint's port.
+/// Its proportional part has magnitude `distance * angle_k * sin(angle)`;
+/// its constant part has the configured magnitude whenever the angle is nonzero.
+fn directional_angle_error(
+    actual: &[f64],
+    port: AxisPort,
+    dim: usize,
+    one_dimensional: bool,
+    params: &SimParams,
+) -> Vec<f64> {
+    let distance = vector::length(actual);
+    if distance <= 1e-6 {
+        return vector::zero(dim);
+    }
+
+    let axis = port.unit_vector(dim);
+    let direction = vector::scale(actual, 1.0 / distance);
+    let direction_alignment = vector::dot(&direction, &axis);
+    let tangent_error = vector::sub(&vector::scale(&direction, direction_alignment), &axis);
+    let tangent_magnitude = vector::length(&tangent_error);
+    if tangent_magnitude <= 1e-8 {
+        return vector::zero(dim);
+    }
+
+    let proportional_scale = distance * spring_angle_stiffness(one_dimensional, params);
+    let constant_scale = spring_constant_angle_force(one_dimensional, params) / tangent_magnitude;
+    vector::scale(&tangent_error, proportional_scale + constant_scale)
 }
 
 /// Deterministic random initial layout in every simulation dimension.
@@ -164,35 +254,37 @@ pub fn simulate(graph: &Graph, params: &SimParams) -> Vec<Vec<f64>> {
             }
         }
 
-        // Directional (or plain) spring per edge.
+        // One Euclidean-length spring per edge, plus an angular spring at
+        // each endpoint that has a compass port.
         for edge in &graph.edges {
             let (tail, head) = (edge.tail, edge.head);
+            let delta = vector::sub(&pos[head], &pos[tail]);
+
+            let fallback_direction = if let Some(port) = edge.tail_port {
+                port.unit_vector(dim)
+            } else if let Some(port) = edge.head_port {
+                vector::scale(&port.unit_vector(dim), -1.0)
+            } else {
+                vector::zero(dim)
+            };
+            let length_error =
+                spring_length_error(&delta, &fallback_direction, edge.one_dimensional, params);
+            vector::sub_in_place(&mut force[head], &length_error);
+            vector::add_in_place(&mut force[tail], &length_error);
 
             if let Some(port) = edge.tail_port {
-                let target = vector::scale(&port.unit_vector(dim), params.edge_length);
-                let actual = vector::sub(&pos[head], &pos[tail]);
-                let err = vector::sub(&actual, &target);
-                let f = vector::scale(&err, params.spring_k);
-                vector::sub_in_place(&mut force[head], &f);
-                vector::add_in_place(&mut force[tail], &f);
+                let angle_error =
+                    directional_angle_error(&delta, port, dim, edge.one_dimensional, params);
+                vector::sub_in_place(&mut force[head], &angle_error);
+                vector::add_in_place(&mut force[tail], &angle_error);
             }
 
             if let Some(port) = edge.head_port {
-                let target = vector::scale(&port.unit_vector(dim), params.edge_length);
                 let actual = vector::sub(&pos[tail], &pos[head]);
-                let err = vector::sub(&actual, &target);
-                let f = vector::scale(&err, params.spring_k);
-                vector::sub_in_place(&mut force[tail], &f);
-                vector::add_in_place(&mut force[head], &f);
-            }
-
-            if edge.tail_port.is_none() && edge.head_port.is_none() {
-                let d = vector::sub(&pos[head], &pos[tail]);
-                let dist = vector::length(&d).max(1e-6);
-                let stretch = dist - params.edge_length;
-                let f = vector::scale(&d, params.spring_k * stretch / dist);
-                vector::sub_in_place(&mut force[head], &f);
-                vector::add_in_place(&mut force[tail], &f);
+                let angle_error =
+                    directional_angle_error(&actual, port, dim, edge.one_dimensional, params);
+                vector::sub_in_place(&mut force[tail], &angle_error);
+                vector::add_in_place(&mut force[head], &angle_error);
             }
         }
 
@@ -279,6 +371,7 @@ pub fn hypercube(n: usize) -> Graph {
                     head: j,
                     tail_port: Some(AxisPort::new(axis, positive)),
                     head_port: Some(AxisPort::new(axis, !positive)),
+                    one_dimensional: false,
                 });
             }
         }
@@ -299,8 +392,67 @@ mod tests {
     fn tuned_defaults_are_stable() {
         let params = SimParams::default();
 
+        assert_eq!(params.edge_length, 100.0);
+        assert_eq!(params.one_d_compression_k, 0.06);
+        assert_eq!(params.one_d_extension_k, 0.01);
+        assert_eq!(params.other_compression_k, 0.01);
+        assert_eq!(params.other_extension_k, 0.01);
+        assert_eq!(params.one_d_angle_k, 0.06);
+        assert_eq!(params.one_d_angle_force, 0.1);
+        assert_eq!(params.other_angle_k, 0.01);
+        assert_eq!(params.other_angle_force, 0.0);
         assert_eq!(params.repulsion, 3500.0);
-        assert_eq!(params.damping, 0.70);
+        assert_eq!(params.damping, 0.5);
+        assert_eq!(params.center_k, 0.001);
+        assert_eq!(params.steps, 1000);
+    }
+
+    fn assert_vector_close(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn length_force_uses_dimension_and_load_specific_coefficients() {
+        let params = SimParams::default();
+        let fallback = [1.0, 0.0];
+
+        assert_vector_close(
+            &spring_length_error(&[80.0, 0.0], &fallback, true, &params),
+            &[-1.2, 0.0],
+        );
+        assert_vector_close(
+            &spring_length_error(&[130.0, 0.0], &fallback, true, &params),
+            &[0.3, 0.0],
+        );
+        assert_vector_close(
+            &spring_length_error(&[80.0, 0.0], &fallback, false, &params),
+            &[-0.2, 0.0],
+        );
+        assert_vector_close(
+            &spring_length_error(&[130.0, 0.0], &fallback, false, &params),
+            &[0.3, 0.0],
+        );
+    }
+
+    #[test]
+    fn angle_force_is_tangential_and_uses_dimension_specific_coefficients() {
+        let params = SimParams::default();
+        let actual = [80.0, 60.0];
+        let port = AxisPort::new(0, true);
+
+        let one_d = directional_angle_error(&actual, port, 2, true, &params);
+        assert_vector_close(&one_d, &[-2.22, 2.96]);
+        assert!((vector::dot(&actual, &one_d)).abs() < 1e-12);
+
+        let other = directional_angle_error(&actual, port, 2, false, &params);
+        assert_vector_close(&other, &[-0.36, 0.48]);
+        assert!((vector::dot(&actual, &other)).abs() < 1e-12);
     }
 
     #[test]

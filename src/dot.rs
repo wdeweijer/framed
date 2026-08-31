@@ -487,6 +487,8 @@ fn compass_spring_edge(
         head: node_of_cell[cell_dim][cell_pos],
         tail_port: Some(AxisPort::new(axis, positive)),
         head_port: Some(AxisPort::new(axis, !positive)),
+        one_dimensional: shape.basis_of(face_dim, face_pos).is_empty()
+            && shape.basis_of(cell_dim, cell_pos).len() == 1,
     }
 }
 

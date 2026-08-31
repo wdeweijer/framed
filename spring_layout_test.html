@@ -90,9 +90,9 @@
     text-align: right;
   }
 
-  .json-entry {
+  .json-entry,
+  .coefficient-entry {
     display: grid;
-    grid-template-columns: auto minmax(240px, 1fr) auto;
     align-items: center;
     gap: 8px 12px;
     padding: 8px 16px;
@@ -100,12 +100,20 @@
     background: #fafafa;
   }
 
-  .json-entry label {
+  .json-entry { grid-template-columns: auto minmax(240px, 1fr) auto; }
+
+  .coefficient-entry {
+    grid-template-columns: auto minmax(240px, 1fr) auto auto minmax(120px, auto);
+  }
+
+  .json-entry label,
+  .coefficient-entry label {
     color: #52525b;
     font-size: 12px;
   }
 
-  .json-entry textarea {
+  .json-entry textarea,
+  .coefficient-entry textarea {
     width: 100%;
     min-height: 58px;
     padding: 7px 9px;
@@ -117,9 +125,18 @@
     font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
   }
 
+  .coefficient-entry textarea { min-height: 44px; }
+
+  .coefficient-status {
+    color: #52525b;
+    font-size: 12px;
+  }
+
+  .coefficient-status.error { color: #b91c1c; }
+
   .parameters {
     display: grid;
-    grid-template-columns: repeat(6, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
     gap: 12px;
     padding: 12px 16px;
     border-bottom: 1px solid #d4d4d8;
@@ -178,6 +195,39 @@
     pointer-events: none;
   }
 
+  .load-legend {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    display: grid;
+    gap: 5px;
+    padding: 8px 10px;
+    border: 1px solid #d4d4d8;
+    border-radius: 5px;
+    background: rgb(255 255 255 / 88%);
+    color: #3f3f46;
+    font-size: 11px;
+    pointer-events: none;
+  }
+
+  .load-legend[hidden] { display: none; }
+
+  .load-scale {
+    display: grid;
+    grid-template-columns: auto 110px auto;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .load-ramp {
+    height: 8px;
+    border: 1px solid #71717a;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #dc2626, #ffffff 50%, #2563eb);
+  }
+
+  .angle-key { color: #a16207; }
+
   @media (max-width: 1050px) {
     header { flex-wrap: wrap; }
     .file-name { order: 3; width: 100%; }
@@ -187,8 +237,8 @@
   @media (max-width: 620px) {
     .actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
     .frame-counter { margin-left: auto; }
-    .json-entry { grid-template-columns: 1fr; }
-    .json-entry button { justify-self: start; }
+    .json-entry, .coefficient-entry { grid-template-columns: 1fr; }
+    .json-entry button, .coefficient-entry button { justify-self: start; }
     .parameters { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
     main { flex: 0 0 620px; }
   }
@@ -196,21 +246,32 @@
   @media (prefers-color-scheme: dark) {
     :root, body { background: #18181b; color: #f4f4f5; }
     header { border-color: #3f3f46; background: #27272a; }
-    .file-name, .json-entry label, .parameter label, .frame-counter, .view-range { color: #a1a1aa; }
+    .file-name, .json-entry label, .coefficient-entry label, .parameter label,
+    .frame-counter, .view-range, .coefficient-status { color: #a1a1aa; }
     button, .file-button {
       border-color: #52525b;
       background: #27272a;
       color: #f4f4f5;
     }
     button:hover, .file-button:hover { background: #3f3f46; }
-    .json-entry, .parameters { border-color: #3f3f46; background: #202023; }
-    .json-entry textarea {
+    .json-entry, .coefficient-entry, .parameters {
+      border-color: #3f3f46;
+      background: #202023;
+    }
+    .json-entry textarea, .coefficient-entry textarea {
       border-color: #52525b;
       background: #27272a;
       color: #f4f4f5;
     }
+    .coefficient-status.error { color: #fca5a5; }
     .parameter output { color: #f4f4f5; }
     main { background: #18181b; }
+    .load-legend {
+      border-color: #52525b;
+      background: rgb(24 24 27 / 88%);
+      color: #d4d4d8;
+    }
+    .angle-key { color: #facc15; }
   }
 </style>
 </head>
@@ -230,8 +291,16 @@
 
 <section class="json-entry" aria-label="OFP JSON input">
   <label for="json-text">OFP JSON</label>
-  <textarea id="json-text" rows="3" spellcheck="false" placeholder='{"version": 1, "nodes": […], "edges": […]}'></textarea>
+  <textarea id="json-text" rows="3" spellcheck="false" placeholder='{"version":1,"basis":[…],"faces_in":[…],"faces_out":[…]}'></textarea>
   <button id="load-json-text" type="button">Load JSON text</button>
+</section>
+
+<section class="coefficient-entry" aria-label="Spring coefficient JSON">
+  <label for="coefficient-text">Coefficients</label>
+  <textarea id="coefficient-text" rows="2" spellcheck="false"></textarea>
+  <button id="copy-coefficients" type="button">Copy coefficients</button>
+  <button id="load-coefficients" type="button">Load coefficients</button>
+  <span id="coefficient-status" class="coefficient-status" aria-live="polite"></span>
 </section>
 
 <section class="parameters" aria-label="Simulation parameters">
@@ -241,9 +310,44 @@
     <input id="edge-length" type="range" min="10" max="250" step="1" value="100" disabled>
   </div>
   <div class="parameter">
-    <label for="spring-k">Spring k</label>
-    <output id="spring-k-out">0.060</output>
-    <input id="spring-k" type="range" min="0.001" max="0.200" step="0.001" value="0.060" disabled>
+    <label for="one-d-compression-k">1D compression k</label>
+    <output id="one-d-compression-k-out">0.060</output>
+    <input id="one-d-compression-k" type="range" min="0" max="0.200" step="0.001" value="0.060" title="Compression stiffness for point-to-line springs" disabled>
+  </div>
+  <div class="parameter">
+    <label for="one-d-extension-k">1D extension k</label>
+    <output id="one-d-extension-k-out">0.010</output>
+    <input id="one-d-extension-k" type="range" min="0" max="0.200" step="0.001" value="0.010" title="Extension stiffness for point-to-line springs" disabled>
+  </div>
+  <div class="parameter">
+    <label for="other-compression-k">Other compression k</label>
+    <output id="other-compression-k-out">0.010</output>
+    <input id="other-compression-k" type="range" min="0" max="0.200" step="0.001" value="0.010" title="Compression stiffness for every spring that is not point-to-line" disabled>
+  </div>
+  <div class="parameter">
+    <label for="other-extension-k">Other extension k</label>
+    <output id="other-extension-k-out">0.010</output>
+    <input id="other-extension-k" type="range" min="0" max="0.200" step="0.001" value="0.010" title="Extension stiffness for every spring that is not point-to-line" disabled>
+  </div>
+  <div class="parameter">
+    <label for="one-d-angle-k">1D angle k</label>
+    <output id="one-d-angle-k-out">0.060</output>
+    <input id="one-d-angle-k" type="range" min="0" max="0.200" step="0.001" value="0.060" title="Angular stiffness for point-to-line springs" disabled>
+  </div>
+  <div class="parameter">
+    <label for="one-d-angle-force">1D angle force</label>
+    <output id="one-d-angle-force-out">0.10</output>
+    <input id="one-d-angle-force" type="range" min="0" max="10" step="0.01" value="0.1" title="Constant tangential alignment force for point-to-line springs" disabled>
+  </div>
+  <div class="parameter">
+    <label for="other-angle-k">Other angle k</label>
+    <output id="other-angle-k-out">0.010</output>
+    <input id="other-angle-k" type="range" min="0" max="0.200" step="0.001" value="0.010" title="Angular stiffness for every spring that is not point-to-line" disabled>
+  </div>
+  <div class="parameter">
+    <label for="other-angle-force">Other angle force</label>
+    <output id="other-angle-force-out">0.00</output>
+    <input id="other-angle-force" type="range" min="0" max="10" step="0.01" value="0" title="Constant tangential alignment force for every spring that is not point-to-line" disabled>
   </div>
   <div class="parameter">
     <label for="repulsion">Repulsion</label>
@@ -252,13 +356,13 @@
   </div>
   <div class="parameter">
     <label for="damping">Damping</label>
-    <output id="damping-out">0.70</output>
-    <input id="damping" type="range" min="0.20" max="0.99" step="0.01" value="0.70" disabled>
+    <output id="damping-out">0.50</output>
+    <input id="damping" type="range" min="0.20" max="0.99" step="0.01" value="0.50" disabled>
   </div>
   <div class="parameter">
     <label for="center-k">Center k</label>
-    <output id="center-k-out">0.0040</output>
-    <input id="center-k" type="range" min="0" max="0.020" step="0.0005" value="0.004" disabled>
+    <output id="center-k-out">0.0010</output>
+    <input id="center-k" type="range" min="0" max="0.020" step="0.0005" value="0.001" disabled>
   </div>
   <div class="parameter">
     <label for="steps">Steps</label>
@@ -269,6 +373,12 @@
 
 <main>
   <canvas id="cv"></canvas>
+  <div id="load-legend" class="load-legend" hidden>
+    <div class="load-scale">
+      <span>Compression</span><span class="load-ramp"></span><span>Extension</span>
+    </div>
+    <span>White = balanced · <span class="angle-key">arc opacity = angle force</span></span>
+  </div>
   <div id="empty-state" class="empty-state">No OFP loaded</div>
 </main>
 
@@ -279,13 +389,30 @@
   // with a fixed seed; browser restarts intentionally continue to use fresh randomness.
   // 2026-07-12: lower repulsion from 6000 to 3500 and damping from 0.82 to
   // 0.70. These values are now also the Rust defaults.
+  // 2026-08-31: split directional spring error into independently tunable
+  // axis-parallel length and axis-perpendicular angle components.
+  // 2026-08-31: make length error Euclidean, split its compression and
+  // extension stiffnesses, and make angle correction tangential to the edge.
+  // 2026-08-31: tune point-to-line length stiffnesses independently from
+  // compression and extension stiffnesses for all other springs.
+  // 2026-08-31: tune point-to-line angular stiffness independently too.
+  // 2026-08-31: add constant-magnitude angular forces alongside angle k.
+  // 2026-08-31: round-trip all force, damping, and centering coefficients
+  // through JSON text.
+  // 2026-08-31: accept partial coefficient JSON and default omitted fields.
+  // 2026-08-31: adopt the tuned split-force coefficients as defaults.
   const canvas = document.getElementById('cv');
   const ctx = canvas.getContext('2d');
   const fileInput = document.getElementById('data-file');
   const jsonText = document.getElementById('json-text');
   const loadJsonTextButton = document.getElementById('load-json-text');
+  const coefficientText = document.getElementById('coefficient-text');
+  const copyCoefficientsButton = document.getElementById('copy-coefficients');
+  const loadCoefficientsButton = document.getElementById('load-coefficients');
+  const coefficientStatus = document.getElementById('coefficient-status');
   const fileName = document.getElementById('file-name');
   const emptyState = document.getElementById('empty-state');
+  const loadLegend = document.getElementById('load-legend');
   const playPauseButton = document.getElementById('play-pause');
   const stepButton = document.getElementById('step');
   const restartButton = document.getElementById('restart');
@@ -294,7 +421,14 @@
 
   const parameterControls = [
     { id: 'edge-length', key: 'edge_length', digits: 0 },
-    { id: 'spring-k', key: 'spring_k', digits: 3 },
+    { id: 'one-d-compression-k', key: 'one_d_compression_k', digits: 3 },
+    { id: 'one-d-extension-k', key: 'one_d_extension_k', digits: 3 },
+    { id: 'other-compression-k', key: 'other_compression_k', digits: 3 },
+    { id: 'other-extension-k', key: 'other_extension_k', digits: 3 },
+    { id: 'one-d-angle-k', key: 'one_d_angle_k', digits: 3 },
+    { id: 'one-d-angle-force', key: 'one_d_angle_force', digits: 2 },
+    { id: 'other-angle-k', key: 'other_angle_k', digits: 3 },
+    { id: 'other-angle-force', key: 'other_angle_force', digits: 2 },
     { id: 'repulsion', key: 'repulsion', digits: 0 },
     { id: 'damping', key: 'damping', digits: 2 },
     { id: 'center-k', key: 'center_k', digits: 4 },
@@ -305,17 +439,45 @@
     output: document.getElementById(`${definition.id}-out`),
   }));
 
+  const COEFFICIENT_KEYS = [
+    'one_d_compression_k',
+    'one_d_extension_k',
+    'other_compression_k',
+    'other_extension_k',
+    'one_d_angle_k',
+    'one_d_angle_force',
+    'other_angle_k',
+    'other_angle_force',
+    'repulsion',
+    'damping',
+    'center_k',
+  ];
+  const coefficientKeySet = new Set(COEFFICIENT_KEYS);
+  const parameterControlByKey = new Map(parameterControls.map(control => [control.key, control]));
+
   const DEFAULT_PARAMETERS = {
     edge_length: 100,
-    spring_k: 0.06,
+    one_d_compression_k: 0.06,
+    one_d_extension_k: 0.01,
+    other_compression_k: 0.01,
+    other_extension_k: 0.01,
+    one_d_angle_k: 0.06,
+    one_d_angle_force: 0.1,
+    other_angle_k: 0.01,
+    other_angle_force: 0.0,
     repulsion: 3500,
-    damping: 0.70,
-    center_k: 0.004,
+    damping: 0.5,
+    center_k: 0.001,
     steps: 1000,
   };
   const PRESET_ANGLES_DEGREES = [0, 90, 33, 6, 80, 3];
   const PRESET_SCALES = [1.5, 1.5, 1.0, 4.1, 4.1, 10.0];
   const LARGER_DIMENSION_SCALE_INCREMENT = 1.0;
+  const FORCE_VISUAL_SCALE = DEFAULT_PARAMETERS.other_extension_k * DEFAULT_PARAMETERS.edge_length;
+  const PORT_ARC_RADIUS = 38;
+  const BALANCED_COLOR = [255, 255, 255];
+  const COMPRESSION_COLOR = [220, 38, 38];
+  const EXTENSION_COLOR = [37, 99, 235];
 
   const V = {
     zero: dimension => new Array(dimension).fill(0),
@@ -352,10 +514,100 @@
     return Math.max(2, highestDirection + 1);
   }
 
-  function validateAndLoad(data, sourceName) {
-    if (data.version !== 1 || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
-      throw new Error('unsupported spring debug data');
+  function framedPosetToDebugData(data) {
+    const tables = [data.basis, data.faces_in, data.faces_out];
+    if (!tables.every(Array.isArray) || tables.some(table => table.length !== data.basis.length)) {
+      throw new Error('basis and signed face tables must have the same number of levels');
     }
+
+    const nodeOfCell = [];
+    const nodes = [];
+
+    for (let dim = 0; dim < data.basis.length; dim += 1) {
+      const level = data.basis[dim];
+      const facesInLevel = data.faces_in[dim];
+      const facesOutLevel = data.faces_out[dim];
+      if (!Array.isArray(level)
+          || !Array.isArray(facesInLevel)
+          || !Array.isArray(facesOutLevel)
+          || facesInLevel.length !== level.length
+          || facesOutLevel.length !== level.length) {
+        throw new Error(`signed face rows at level ${dim} must match the number of cells`);
+      }
+      nodeOfCell.push(new Array(level.length));
+
+      for (let pos = 0; pos < level.length; pos += 1) {
+        const basis = level[pos];
+        if (!Array.isArray(basis)
+            || basis.some(axis => !Number.isInteger(axis) || axis < 0)
+            || new Set(basis).size !== basis.length) {
+          throw new Error(`invalid basis for cell (${dim}, ${pos})`);
+        }
+        if (!Array.isArray(facesInLevel[pos]) || !Array.isArray(facesOutLevel[pos])) {
+          throw new Error(`invalid signed face row for cell (${dim}, ${pos})`);
+        }
+
+        const id = nodes.length;
+        nodeOfCell[dim][pos] = id;
+        nodes.push({
+          id,
+          cell_dimension: dim,
+          cell_position: pos,
+          basis: [...basis],
+          label: `(${dim}, ${pos})\n${basis.length === 0 ? '{}' : `{${basis.join(',')}}`}`,
+        });
+      }
+    }
+
+    const edges = [];
+    for (let dim = 1; dim < data.basis.length; dim += 1) {
+      for (let pos = 0; pos < data.basis[dim].length; pos += 1) {
+        const addEdges = (faces, sign) => {
+          for (const face of faces) {
+            if (!Number.isInteger(face) || face < 0 || face >= data.basis[dim - 1].length) {
+              throw new Error(`face index at level ${dim} is out of bounds`);
+            }
+
+            const faceBasis = new Set(data.basis[dim - 1][face]);
+            const addedAxes = data.basis[dim][pos].filter(axis => !faceBasis.has(axis));
+            if (addedAxes.length !== 1) {
+              throw new Error(`cover relation (${dim - 1}, ${face}) → (${dim}, ${pos}) must add one basis direction`);
+            }
+
+            const positive = sign === 'input';
+            edges.push({
+              tail: nodeOfCell[dim - 1][face],
+              head: nodeOfCell[dim][pos],
+              sign,
+              tail_port: { axis: addedAxes[0], positive },
+              head_port: { axis: addedAxes[0], positive: !positive },
+            });
+          }
+        };
+
+        addEdges(data.faces_in[dim][pos], 'input');
+        addEdges(data.faces_out[dim][pos], 'output');
+      }
+    }
+
+    return { version: 1, nodes, edges };
+  }
+
+  function normalizeGraphData(data) {
+    if (!data || data.version !== 1) {
+      throw new Error('unsupported JSON version');
+    }
+    if (Array.isArray(data.nodes) && Array.isArray(data.edges)) return data;
+    if (Array.isArray(data.basis)
+        && Array.isArray(data.faces_in)
+        && Array.isArray(data.faces_out)) {
+      return framedPosetToDebugData(data);
+    }
+    throw new Error('expected spring debug data or a serialized FramedPoset');
+  }
+
+  function validateAndLoad(data, sourceName) {
+    data = normalizeGraphData(data);
 
     const orderedNodes = [...data.nodes].sort((a, b) => a.id - b.id);
     orderedNodes.forEach((node, index) => {
@@ -369,15 +621,16 @@
 
     graph = { nodes: orderedNodes, edges: data.edges };
     dimension = dimensionFromBases(orderedNodes);
-    parameters = { ...DEFAULT_PARAMETERS };
     fileName.textContent = `${sourceName} · ${dimension}D · ${orderedNodes.length} cells`;
     emptyState.hidden = true;
+    loadLegend.hidden = false;
 
     for (const control of parameterControls) {
       control.input.disabled = false;
       control.input.value = parameters[control.key];
       updateParameterOutput(control);
     }
+    refreshCoefficientText();
     playPauseButton.disabled = false;
     stepButton.disabled = false;
     restartButton.disabled = false;
@@ -390,6 +643,90 @@
 
   function updateParameterOutput(control) {
     control.output.value = Number(control.input.value).toFixed(control.digits);
+  }
+
+  function coefficientJson() {
+    return JSON.stringify(Object.fromEntries(
+      COEFFICIENT_KEYS.map(key => [key, parameters[key]]),
+    ));
+  }
+
+  function refreshCoefficientText() {
+    coefficientText.value = coefficientJson();
+  }
+
+  function setCoefficientStatus(message, error = false) {
+    coefficientStatus.textContent = message;
+    coefficientStatus.classList.toggle('error', error);
+  }
+
+  function loadCoefficientsFromTextArea() {
+    try {
+      const sourceText = coefficientText.value.trim();
+      if (!sourceText) throw new Error('enter coefficient JSON before loading');
+      const parsed = JSON.parse(sourceText);
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        throw new Error('coefficient JSON must be an object');
+      }
+
+      const unknownKeys = Object.keys(parsed).filter(key => !coefficientKeySet.has(key));
+      if (unknownKeys.length > 0) {
+        throw new Error(`unknown coefficient: ${unknownKeys.join(', ')}`);
+      }
+
+      const validated = new Map();
+      for (const key of COEFFICIENT_KEYS) {
+        const value = Object.hasOwn(parsed, key) ? parsed[key] : DEFAULT_PARAMETERS[key];
+        const control = parameterControlByKey.get(key);
+        const min = Number(control.input.min);
+        const max = Number(control.input.max);
+        const step = Number(control.input.step);
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error(`${key} must be a finite number`);
+        }
+        if (value < min || value > max) {
+          throw new Error(`${key} must be between ${min} and ${max}`);
+        }
+        const stepOffset = (value - min) / step;
+        if (Math.abs(stepOffset - Math.round(stepOffset)) > 1e-8) {
+          throw new Error(`${key} must use increments of ${step}`);
+        }
+        validated.set(key, value);
+      }
+
+      for (const [key, value] of validated) {
+        const control = parameterControlByKey.get(key);
+        parameters[key] = value;
+        control.input.value = value;
+        updateParameterOutput(control);
+      }
+      refreshCoefficientText();
+      setCoefficientStatus('Loaded coefficients');
+      restart();
+    } catch (error) {
+      console.error(error);
+      setCoefficientStatus(`Could not load: ${error.message}`, true);
+    }
+  }
+
+  async function copyCoefficients() {
+    refreshCoefficientText();
+    const sourceText = coefficientText.value;
+    try {
+      if (!globalThis.navigator?.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await globalThis.navigator.clipboard.writeText(sourceText);
+      setCoefficientStatus('Copied coefficients');
+    } catch (error) {
+      coefficientText.focus();
+      coefficientText.select();
+      let copied = false;
+      try {
+        copied = Boolean(document.execCommand?.('copy'));
+      } catch {
+        // The selected text remains ready for a manual copy.
+      }
+      setCoefficientStatus(copied ? 'Copied coefficients' : 'Select text and copy');
+    }
   }
 
   function restart(newRandomStart = false, resume = running) {
@@ -422,6 +759,65 @@
     return vector;
   }
 
+  function isOneDimensionalSpring(edge) {
+    const tailDimension = nodes[edge.tail].definition.basis.length;
+    const headDimension = nodes[edge.head].definition.basis.length;
+    return Math.min(tailDimension, headDimension) === 0
+      && Math.max(tailDimension, headDimension) === 1;
+  }
+
+  function springLengthStiffness(stretch, oneDimensional) {
+    if (oneDimensional) {
+      return stretch < 0
+        ? parameters.one_d_compression_k
+        : parameters.one_d_extension_k;
+    }
+    return stretch < 0
+      ? parameters.other_compression_k
+      : parameters.other_extension_k;
+  }
+
+  function springAngleStiffness(oneDimensional) {
+    return oneDimensional ? parameters.one_d_angle_k : parameters.other_angle_k;
+  }
+
+  function springConstantAngleForce(oneDimensional) {
+    return oneDimensional
+      ? parameters.one_d_angle_force
+      : parameters.other_angle_force;
+  }
+
+  function springLengthError(actual, fallbackDirection, oneDimensional) {
+    const distance = V.length(actual);
+    const direction = distance > 1e-6
+      ? V.scale(actual, 1 / distance)
+      : fallbackDirection;
+    const stretch = distance - parameters.edge_length;
+    const lengthK = springLengthStiffness(stretch, oneDimensional);
+    return V.scale(direction, lengthK * stretch);
+  }
+
+  function directionalAngleError(actual, port, oneDimensional) {
+    const axis = unitVector(port);
+    const distance = V.length(actual);
+    if (distance <= 1e-6) return V.zero(dimension);
+    const direction = V.scale(actual, 1 / distance);
+
+    // This is the component of the desired direction tangent to the sphere
+    // of constant edge length, with the sign flipped because callers subtract
+    // the returned error from the endpoint's force.
+    const directionAlignment = V.dot(direction, axis);
+    const tangentError = V.sub(V.scale(direction, directionAlignment), axis);
+    const tangentMagnitude = V.length(tangentError);
+    if (tangentMagnitude <= 1e-8) return V.zero(dimension);
+
+    // tangentMagnitude is sin(angle). Dividing the added force by it makes
+    // that term's final magnitude independent of the angular error.
+    const proportionalScale = distance * springAngleStiffness(oneDimensional);
+    const constantScale = springConstantAngleForce(oneDimensional) / tangentMagnitude;
+    return V.scale(tangentError, proportionalScale + constantScale);
+  }
+
   function simulationStep() {
     const force = nodes.map(() => V.zero(dimension));
 
@@ -439,32 +835,31 @@
     for (const edge of graph.edges) {
       const tail = edge.tail;
       const head = edge.head;
+      const delta = V.sub(nodes[head].pos, nodes[tail].pos);
+      const oneDimensional = isOneDimensionalSpring(edge);
+
+      let fallbackDirection = V.zero(dimension);
+      if (edge.tail_port) fallbackDirection = unitVector(edge.tail_port);
+      else if (edge.head_port) fallbackDirection = V.scale(unitVector(edge.head_port), -1);
+      const lengthSpring = springLengthError(
+        delta,
+        fallbackDirection,
+        oneDimensional,
+      );
+      V.subInPlace(force[head], lengthSpring);
+      V.addInPlace(force[tail], lengthSpring);
 
       if (edge.tail_port) {
-        const target = V.scale(unitVector(edge.tail_port), parameters.edge_length);
-        const actual = V.sub(nodes[head].pos, nodes[tail].pos);
-        const error = V.sub(actual, target);
-        const spring = V.scale(error, parameters.spring_k);
-        V.subInPlace(force[head], spring);
-        V.addInPlace(force[tail], spring);
+        const angleSpring = directionalAngleError(delta, edge.tail_port, oneDimensional);
+        V.subInPlace(force[head], angleSpring);
+        V.addInPlace(force[tail], angleSpring);
       }
 
       if (edge.head_port) {
-        const target = V.scale(unitVector(edge.head_port), parameters.edge_length);
         const actual = V.sub(nodes[tail].pos, nodes[head].pos);
-        const error = V.sub(actual, target);
-        const spring = V.scale(error, parameters.spring_k);
-        V.subInPlace(force[tail], spring);
-        V.addInPlace(force[head], spring);
-      }
-
-      if (!edge.tail_port && !edge.head_port) {
-        const delta = V.sub(nodes[head].pos, nodes[tail].pos);
-        const distance = Math.max(V.length(delta), 1e-6);
-        const stretch = distance - parameters.edge_length;
-        const spring = V.scale(delta, parameters.spring_k * stretch / distance);
-        V.subInPlace(force[head], spring);
-        V.addInPlace(force[tail], spring);
+        const angleSpring = directionalAngleError(actual, edge.head_port, oneDimensional);
+        V.subInPlace(force[tail], angleSpring);
+        V.addInPlace(force[head], angleSpring);
       }
     }
 
@@ -509,6 +904,75 @@
     return [x, y];
   }
 
+  function forceVisualIntensity(forceMagnitude) {
+    return 1 - Math.exp(-Math.max(0, forceMagnitude) / FORCE_VISUAL_SCALE);
+  }
+
+  function mixColor(from, to, amount) {
+    const channels = from.map((channel, index) => {
+      return Math.round(channel + (to[index] - channel) * amount);
+    });
+    return `rgb(${channels.join(' ')})`;
+  }
+
+  function springLoadStyle(actual, oneDimensional) {
+    const stretch = V.length(actual) - parameters.edge_length;
+    const lengthK = springLengthStiffness(stretch, oneDimensional);
+    const forceMagnitude = Math.abs(stretch) * lengthK;
+    const targetColor = stretch < 0 ? COMPRESSION_COLOR : EXTENSION_COLOR;
+    return {
+      color: mixColor(BALANCED_COLOR, targetColor, forceVisualIntensity(forceMagnitude)),
+      forceMagnitude,
+      stretch,
+    };
+  }
+
+  function projectedPortDirection(port) {
+    const projectedAxis = projectionAxis(port.axis);
+    const sign = port.positive ? 1 : -1;
+    return [projectedAxis[0] * sign, projectedAxis[1] * sign];
+  }
+
+  function drawPortAngleArc(x, y, actualDirection, port, forceMagnitude, dark) {
+    const actualLength = Math.hypot(actualDirection[0], actualDirection[1]);
+    const desiredDirection = projectedPortDirection(port);
+    const desiredLength = Math.hypot(desiredDirection[0], desiredDirection[1]);
+    if (actualLength <= 1e-6 || desiredLength <= 1e-6) return;
+
+    const startAngle = Math.atan2(actualDirection[1], actualDirection[0]);
+    const desiredAngle = Math.atan2(desiredDirection[1], desiredDirection[0]);
+    const angleDelta = Math.atan2(
+      Math.sin(desiredAngle - startAngle),
+      Math.cos(desiredAngle - startAngle),
+    );
+    const opacity = 0.95 * forceVisualIntensity(forceMagnitude);
+    if (Math.abs(angleDelta) <= 1e-3 || opacity <= 1e-3) return;
+
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = dark ? '#facc15' : '#a16207';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(x, y, PORT_ARC_RADIUS, startAngle, startAngle + angleDelta, angleDelta < 0);
+    ctx.stroke();
+
+    const desiredX = desiredDirection[0] / desiredLength;
+    const desiredY = desiredDirection[1] / desiredLength;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(
+      x + desiredX * (PORT_ARC_RADIUS - 4),
+      y + desiredY * (PORT_ARC_RADIUS - 4),
+    );
+    ctx.lineTo(
+      x + desiredX * (PORT_ARC_RADIUS + 4),
+      y + desiredY * (PORT_ARC_RADIUS + 4),
+    );
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function draw() {
     const ratio = window.devicePixelRatio || 1;
     const width = canvas.width / ratio;
@@ -543,14 +1007,62 @@
     for (const edge of orderedEdges) {
       const [tailX, tailY] = toCanvas(projected[edge.tail]);
       const [headX, headY] = toCanvas(projected[edge.head]);
-      const color = edge.sign === 'input' ? '#c2410c' : '#2563eb';
+      const actual = V.sub(nodes[edge.head].pos, nodes[edge.tail].pos);
+      const loadStyle = springLoadStyle(actual, isOneDimensionalSpring(edge));
+
       ctx.beginPath();
       ctx.moveTo(tailX, tailY);
       ctx.lineTo(headX, headY);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = dark ? 'rgb(9 9 11 / 75%)' : 'rgb(82 82 91 / 65%)';
+      ctx.lineWidth = 4.5;
       ctx.stroke();
-      ctx.fillStyle = color;
+
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(headX, headY);
+      ctx.strokeStyle = loadStyle.color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+
+    for (const edge of orderedEdges) {
+      const [tailX, tailY] = toCanvas(projected[edge.tail]);
+      const [headX, headY] = toCanvas(projected[edge.head]);
+      const actual = V.sub(nodes[edge.head].pos, nodes[edge.tail].pos);
+      const oneDimensional = isOneDimensionalSpring(edge);
+      if (edge.tail_port) {
+        const angleForce = V.length(
+          directionalAngleError(actual, edge.tail_port, oneDimensional),
+        );
+        drawPortAngleArc(
+          tailX,
+          tailY,
+          [headX - tailX, headY - tailY],
+          edge.tail_port,
+          angleForce,
+          dark,
+        );
+      }
+      if (edge.head_port) {
+        const reverseActual = V.scale(actual, -1);
+        const angleForce = V.length(
+          directionalAngleError(reverseActual, edge.head_port, oneDimensional),
+        );
+        drawPortAngleArc(
+          headX,
+          headY,
+          [tailX - headX, tailY - headY],
+          edge.head_port,
+          angleForce,
+          dark,
+        );
+      }
+    }
+
+    for (const edge of orderedEdges) {
+      const [tailX, tailY] = toCanvas(projected[edge.tail]);
+      const [headX, headY] = toCanvas(projected[edge.head]);
+      ctx.fillStyle = dark ? '#f4f4f5' : '#18181b';
       ctx.font = '11px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -600,9 +1112,22 @@
         ? Number.parseInt(control.input.value, 10)
         : Number.parseFloat(control.input.value);
       updateParameterOutput(control);
+      if (coefficientKeySet.has(control.key)) {
+        refreshCoefficientText();
+        setCoefficientStatus('');
+      }
       restart();
     });
   }
+
+  copyCoefficientsButton.addEventListener('click', copyCoefficients);
+  loadCoefficientsButton.addEventListener('click', loadCoefficientsFromTextArea);
+  coefficientText.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      loadCoefficientsFromTextArea();
+    }
+  });
 
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files[0];
@@ -664,6 +1189,7 @@
     draw();
   });
 
+  refreshCoefficientText();
   resize();
   animationLoop();
 })();
