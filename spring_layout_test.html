@@ -15,6 +15,8 @@
   * { box-sizing: border-box; }
 
   body {
+    display: flex;
+    flex-direction: column;
     margin: 0;
     min-height: 100vh;
     background: #f4f4f2;
@@ -88,6 +90,33 @@
     text-align: right;
   }
 
+  .json-entry {
+    display: grid;
+    grid-template-columns: auto minmax(240px, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 16px;
+    border-bottom: 1px solid #d4d4d8;
+    background: #fafafa;
+  }
+
+  .json-entry label {
+    color: #52525b;
+    font-size: 12px;
+  }
+
+  .json-entry textarea {
+    width: 100%;
+    min-height: 58px;
+    padding: 7px 9px;
+    resize: vertical;
+    border: 1px solid #a1a1aa;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #18181b;
+    font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
   .parameters {
     display: grid;
     grid-template-columns: repeat(6, minmax(150px, 1fr));
@@ -126,7 +155,8 @@
 
   main {
     position: relative;
-    height: calc(100vh - 137px);
+    flex: 1 1 auto;
+    height: auto;
     min-height: 420px;
     overflow: hidden;
     background: #ffffff;
@@ -152,27 +182,33 @@
     header { flex-wrap: wrap; }
     .file-name { order: 3; width: 100%; }
     .parameters { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
-    main { height: calc(100vh - 209px); }
   }
 
   @media (max-width: 620px) {
     .actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
     .frame-counter { margin-left: auto; }
+    .json-entry { grid-template-columns: 1fr; }
+    .json-entry button { justify-self: start; }
     .parameters { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
-    main { height: 620px; }
+    main { flex: 0 0 620px; }
   }
 
   @media (prefers-color-scheme: dark) {
     :root, body { background: #18181b; color: #f4f4f5; }
     header { border-color: #3f3f46; background: #27272a; }
-    .file-name, .parameter label, .frame-counter, .view-range { color: #a1a1aa; }
+    .file-name, .json-entry label, .parameter label, .frame-counter, .view-range { color: #a1a1aa; }
     button, .file-button {
       border-color: #52525b;
       background: #27272a;
       color: #f4f4f5;
     }
     button:hover, .file-button:hover { background: #3f3f46; }
-    .parameters { border-color: #3f3f46; background: #202023; }
+    .json-entry, .parameters { border-color: #3f3f46; background: #202023; }
+    .json-entry textarea {
+      border-color: #52525b;
+      background: #27272a;
+      color: #f4f4f5;
+    }
     .parameter output { color: #f4f4f5; }
     main { background: #18181b; }
   }
@@ -191,6 +227,12 @@
     <span id="view-range" class="view-range">View x [—, —] · y [—, —]</span>
   </div>
 </header>
+
+<section class="json-entry" aria-label="OFP JSON input">
+  <label for="json-text">OFP JSON</label>
+  <textarea id="json-text" rows="3" spellcheck="false" placeholder='{"version": 1, "nodes": […], "edges": […]}'></textarea>
+  <button id="load-json-text" type="button">Load JSON text</button>
+</section>
 
 <section class="parameters" aria-label="Simulation parameters">
   <div class="parameter">
@@ -240,6 +282,8 @@
   const canvas = document.getElementById('cv');
   const ctx = canvas.getContext('2d');
   const fileInput = document.getElementById('data-file');
+  const jsonText = document.getElementById('json-text');
+  const loadJsonTextButton = document.getElementById('load-json-text');
   const fileName = document.getElementById('file-name');
   const emptyState = document.getElementById('empty-state');
   const playPauseButton = document.getElementById('play-pause');
@@ -338,6 +382,10 @@
     stepButton.disabled = false;
     restartButton.disabled = false;
     restart(true, true);
+  }
+
+  function parseAndLoad(sourceText, sourceName) {
+    validateAndLoad(JSON.parse(sourceText), sourceName);
   }
 
   function updateParameterOutput(control) {
@@ -560,12 +608,38 @@
     const file = fileInput.files[0];
     if (!file) return;
     try {
-      validateAndLoad(JSON.parse(await file.text()), file.name);
+      const sourceText = await file.text();
+      jsonText.value = sourceText;
+      parseAndLoad(sourceText, file.name);
     } catch (error) {
       console.error(error);
       fileName.textContent = `Could not load ${file.name}`;
     } finally {
       fileInput.value = '';
+    }
+  });
+
+  function loadJsonFromTextArea() {
+    const sourceText = jsonText.value.trim();
+    if (!sourceText) {
+      fileName.textContent = 'Enter OFP JSON before loading';
+      jsonText.focus();
+      return;
+    }
+
+    try {
+      parseAndLoad(sourceText, 'Entered JSON');
+    } catch (error) {
+      console.error(error);
+      fileName.textContent = `Could not load entered JSON: ${error.message}`;
+    }
+  }
+
+  loadJsonTextButton.addEventListener('click', loadJsonFromTextArea);
+  jsonText.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      loadJsonFromTextArea();
     }
   });
 
