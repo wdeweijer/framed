@@ -686,6 +686,52 @@ pub fn iterated_boundary(
     (current, into_shape)
 }
 
+/// Compute the length function of an OFP known to be a polyvoxel.
+///
+/// The result has one entry for every direction below the rank of the
+/// polyvoxel. Entries corresponding to directions outside its frame are zero.
+/// This deliberately follows the structural definition by taking all input
+/// boundaries except the direction whose length is being measured, so it is
+/// substantially slower than the constructor-based cache in
+/// [`crate::polyvoxel::Polyvoxel`].
+pub fn polyvoxel_length(shape: &Arc<FramedPoset>) -> Vec<usize> {
+    let frame = shape.active_directions();
+    let Some(&max_direction) = frame.last() else {
+        return vec![];
+    };
+    let rank = max_direction
+        .checked_add(1)
+        .expect("polyvoxel rank exceeds usize::MAX");
+    let mut length = vec![0; rank];
+
+    for &direction in &frame {
+        let word: Vec<_> = frame
+            .iter()
+            .copied()
+            .filter(|&other| other != direction)
+            .map(|other| (Sign::Input, other))
+            .collect();
+        let (spine, _) = iterated_boundary(&word, shape);
+        let one_cells = spine.sizes().get(1).copied().unwrap_or(0);
+        length[direction] = (0..one_cells)
+            .filter(|&pos| spine.basis_of(1, pos).as_slice() == [direction])
+            .count();
+    }
+
+    length
+}
+
+/// Compute the layering direction of an OFP known to be a polyvoxel.
+///
+/// `None` represents the value infinity, equivalently that the polyvoxel is a
+/// voxel. This is the slow structural implementation used to check the cached
+/// constructor formulas.
+pub fn polyvoxel_layering_direction(shape: &Arc<FramedPoset>) -> Option<usize> {
+    polyvoxel_length(shape)
+        .iter()
+        .position(|&length| length > 1)
+}
+
 /// Compute the smallest closed embedding whose image contains `subset`.
 pub fn closure(subset: &FramedPosetSubset) -> (Arc<FramedPoset>, Embedding) {
     debug_assert!(subset.well_formed());
@@ -910,6 +956,32 @@ mod tests {
         assert_eq!(shifted.cofaces_out, original.cofaces_out);
         assert!(!shifted.is_normal());
         assert!(shifted.well_formed());
+    }
+
+    #[test]
+    fn polyvoxel_length_and_layering_follow_the_structural_definition() {
+        let point = Arc::new(FramedPoset::point());
+        let arrow = tight_arrow();
+        let shifted_arrow = Arc::new(shift(&arrow));
+        let square = square();
+        let path = Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![], vec![]], vec![vec![0], vec![0]]],
+            vec![vec![vec![], vec![], vec![]], vec![vec![0], vec![1]]],
+            vec![vec![vec![], vec![], vec![]], vec![vec![1], vec![2]]],
+        ));
+        let shifted_path = Arc::new(shift(&path));
+
+        for (shape, expected_length, expected_layering) in [
+            (&point, vec![], None),
+            (&arrow, vec![1], None),
+            (&shifted_arrow, vec![0, 1], None),
+            (&square, vec![1, 1], None),
+            (&path, vec![2], Some(0)),
+            (&shifted_path, vec![0, 2], Some(1)),
+        ] {
+            assert_eq!(polyvoxel_length(shape), expected_length);
+            assert_eq!(polyvoxel_layering_direction(shape), expected_layering);
+        }
     }
 
     #[test]

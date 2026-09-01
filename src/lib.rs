@@ -38,7 +38,8 @@ pub use orthogonal::{
 };
 pub use polyvoxel::Polyvoxel;
 pub use poset::{
-    Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure, iterated_boundary, shift,
+    Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure, iterated_boundary,
+    polyvoxel_layering_direction, polyvoxel_length, shift,
 };
 pub use random::RandomFramedPosetGenerator;
 pub use symmetry::{

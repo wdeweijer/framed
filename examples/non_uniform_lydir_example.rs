@@ -13,7 +13,11 @@ fn main() -> io::Result<()> {
     let v = paste(&u, &double_prism,0).1;
 
     println!("{}", serde_json::to_string(v.as_ref())?);
-    fs::write("visualizations/non_uniform_lydir_example.dot", to_dot(&v, Renderer::CompassSpring))?;
+    // fs::write("visualizations/non_uniform_lydir_example.dot", to_dot(&v, Renderer::CompassSpring))?;
+
+    println!("{:?}", u.layering_direction());
+    println!("{:?}", double_prism.layering_direction());
+    println!("{:?}", v.layering_direction());
 
     Ok(())
 }

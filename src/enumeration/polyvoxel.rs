@@ -455,6 +455,7 @@ impl CatalogBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::poset::{polyvoxel_layering_direction, polyvoxel_length};
 
     #[test]
     fn directions_zero_through_two_give_three_tight_arrows() {
@@ -477,6 +478,14 @@ mod tests {
         let catalog = enumerate_polyvoxels(5, &[0, 1, 2]);
 
         for (result, entry) in catalog.entries().iter().enumerate() {
+            assert_eq!(
+                entry.shape.length(),
+                polyvoxel_length(entry.shape.as_framed_poset())
+            );
+            assert_eq!(
+                entry.shape.layering_direction(),
+                polyvoxel_layering_direction(entry.shape.as_framed_poset())
+            );
             assert!(!entry.factorizations.is_empty());
             for factorization in &entry.factorizations {
                 let reconstructed = reconstruct(&catalog, factorization);
