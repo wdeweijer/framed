@@ -10,12 +10,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::embedding::Embedding;
 use crate::intset::{self, IntSet};
 use crate::isomorphism::{isomorphic, isomorphisms, normalize};
-use crate::polyvoxel::{cylinder, point, shift};
+use crate::polyvoxel::{Polyvoxel, cylinder, paste, point, shift};
 use crate::poset::{FramedPoset, Sign, boundary};
-use crate::pushout::pushout;
 use crate::volumetric::is_volumetric;
 
 /// One immediate construction of a polyvoxel in a bounded catalogue.
@@ -71,7 +69,7 @@ impl PolyvoxelFactorization {
 /// One isomorphism class in a bounded polyvoxel catalogue.
 #[derive(Debug, Clone)]
 pub struct PolyvoxelEntry {
-    pub shape: Arc<FramedPoset>,
+    pub shape: Polyvoxel,
     pub is_voxel: bool,
     pub factorizations: Vec<PolyvoxelFactorization>,
 }
@@ -153,7 +151,7 @@ pub fn enumerate_polyvoxels_with_progress(
         let shapes: Vec<_> = builder
             .entries
             .iter()
-            .map(|entry| Arc::clone(&entry.shape))
+            .map(|entry| entry.shape.clone())
             .collect();
         let voxels: Vec<_> = builder
             .entries
@@ -241,10 +239,10 @@ pub fn enumerate_polyvoxels_with_progress(
                     .filter(|direction| right_frame.binary_search(direction).is_ok());
 
                 for direction in common_directions {
-                    let (left_boundary, into_left) =
-                        boundary(Sign::Output, direction, &shapes[left]);
-                    let (right_boundary, into_right) =
-                        boundary(Sign::Input, direction, &shapes[right]);
+                    let (left_boundary, _) =
+                        boundary(Sign::Output, direction, shapes[left].as_framed_poset());
+                    let (right_boundary, _) =
+                        boundary(Sign::Input, direction, shapes[right].as_framed_poset());
 
                     let result_cells = cell_count(&shapes[left])
                         .saturating_add(cell_count(&shapes[right]))
@@ -259,10 +257,9 @@ pub fn enumerate_polyvoxels_with_progress(
                         "polyvoxel boundaries should have at most one isomorphism",
                     );
                     for isomorphism in boundary_isomorphisms {
-                        let into_right = Embedding::compose(&isomorphism, &into_right);
-                        let pasted = pushout(&into_left, &into_right);
+                        let (_, pasted) = paste(&shapes[left], &shapes[right], direction);
                         changed |= builder.record(
-                            pasted.tip,
+                            pasted,
                             false,
                             PolyvoxelFactorization::Paste {
                                 direction,
@@ -322,7 +319,7 @@ fn report_milestone(
     }
 }
 
-fn cylinder_is_defined(input: &Arc<FramedPoset>, output: &Arc<FramedPoset>) -> bool {
+fn cylinder_is_defined(input: &Polyvoxel, output: &Polyvoxel) -> bool {
     let input_frame = input.active_directions();
     let output_frame = output.active_directions();
     let input_without_zero: IntSet = input_frame
@@ -334,8 +331,8 @@ fn cylinder_is_defined(input: &Arc<FramedPoset>, output: &Arc<FramedPoset>) -> b
     intset::is_subset(&input_without_zero, &output_frame)
         && intset::is_subset(&output_frame, &input_frame)
         && [Sign::Input, Sign::Output].into_iter().all(|sign| {
-            let (input_boundary, _) = boundary(sign, 0, input);
-            let (output_boundary, _) = boundary(sign, 0, output);
+            let (input_boundary, _) = boundary(sign, 0, input.as_framed_poset());
+            let (output_boundary, _) = boundary(sign, 0, output.as_framed_poset());
             isomorphic(&input_boundary, &output_boundary)
         })
 }
@@ -345,7 +342,8 @@ fn cell_count(shape: &FramedPoset) -> usize {
 }
 
 struct WorkingEntry {
-    shape: Arc<FramedPoset>,
+    shape: Polyvoxel,
+    canonical_shape: Arc<FramedPoset>,
     is_voxel: bool,
     factorizations: BTreeSet<PolyvoxelFactorization>,
 }
@@ -378,7 +376,7 @@ impl CatalogBuilder {
 
     fn record(
         &mut self,
-        shape: Arc<FramedPoset>,
+        shape: Polyvoxel,
         is_voxel: bool,
         factorization: PolyvoxelFactorization,
     ) -> bool {
@@ -388,8 +386,8 @@ impl CatalogBuilder {
             return false;
         }
 
-        let shape = Arc::new(normalize(&shape));
-        if let Some(&index) = self.indices.get(&shape) {
+        let canonical_shape = Arc::new(normalize(&shape));
+        if let Some(&index) = self.indices.get(&canonical_shape) {
             let entry = &mut self.entries[index];
             let became_voxel = is_voxel && !entry.is_voxel;
             entry.is_voxel |= is_voxel;
@@ -397,11 +395,12 @@ impl CatalogBuilder {
         }
 
         debug_assert!(shape.well_formed());
-        debug_assert!(is_volumetric(&shape));
+        debug_assert!(is_volumetric(shape.as_framed_poset()));
         let index = self.entries.len();
-        self.indices.insert(Arc::clone(&shape), index);
+        self.indices.insert(Arc::clone(&canonical_shape), index);
         self.entries.push(WorkingEntry {
             shape,
+            canonical_shape,
             is_voxel,
             factorizations: BTreeSet::from([factorization]),
         });
@@ -413,7 +412,7 @@ impl CatalogBuilder {
             .entries
             .iter()
             .map(|entry| {
-                serde_json::to_string(entry.shape.as_ref())
+                serde_json::to_string(entry.canonical_shape.as_ref())
                     .expect("serializing a framed poset to a string cannot fail")
             })
             .collect();
@@ -442,7 +441,7 @@ impl CatalogBuilder {
                     .into_iter()
                     .collect();
                 PolyvoxelEntry {
-                    shape: Arc::clone(&entry.shape),
+                    shape: entry.shape.clone(),
                     is_voxel: entry.is_voxel,
                     factorizations,
                 }
@@ -482,8 +481,8 @@ mod tests {
             for factorization in &entry.factorizations {
                 let reconstructed = reconstruct(&catalog, factorization);
                 assert_eq!(
-                    normalize(&reconstructed),
-                    *entry.shape,
+                    normalize(reconstructed.as_ref()),
+                    normalize(entry.shape.as_ref()),
                     "factorization {factorization:?} did not reconstruct entry {result}",
                 );
             }
@@ -521,7 +520,7 @@ mod tests {
     fn reconstruct(
         catalog: &PolyvoxelCatalog,
         factorization: &PolyvoxelFactorization,
-    ) -> Arc<FramedPoset> {
+    ) -> Polyvoxel {
         match factorization {
             PolyvoxelFactorization::Point => point(),
             PolyvoxelFactorization::Shift { source } => shift(&catalog.entry(*source).shape),
@@ -536,14 +535,14 @@ mod tests {
             } => {
                 let left = &catalog.entry(*left).shape;
                 let right = &catalog.entry(*right).shape;
-                let (left_boundary, into_left) = boundary(Sign::Output, *direction, left);
-                let (right_boundary, into_right) = boundary(Sign::Input, *direction, right);
-                let isomorphism = isomorphisms(&left_boundary, &right_boundary)
+                let (left_boundary, _) = boundary(Sign::Output, *direction, left.as_framed_poset());
+                let (right_boundary, _) =
+                    boundary(Sign::Input, *direction, right.as_framed_poset());
+                isomorphisms(&left_boundary, &right_boundary)
                     .into_iter()
                     .find(|isomorphism| &isomorphism.map == boundary_isomorphism)
                     .expect("recorded boundary isomorphism must still exist");
-                let into_right = Embedding::compose(&isomorphism, &into_right);
-                pushout(&into_left, &into_right).tip
+                paste(left, right, *direction).1
             }
         }
     }

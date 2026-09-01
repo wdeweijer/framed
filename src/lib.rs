@@ -36,6 +36,7 @@ pub use orthogonal::{
     orthogonal_product, orthogonal_product_associator, orthogonal_product_commutator,
     orthogonal_product_embedding,
 };
+pub use polyvoxel::Polyvoxel;
 pub use poset::{
     Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure, iterated_boundary, shift,
 };

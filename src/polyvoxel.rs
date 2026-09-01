@@ -1,48 +1,86 @@
-//! Convenient constructors for polyvoxels.
+//! Polyvoxels and their inductive constructors.
 //!
-//! Except for [`point`], these functions assume that every input shape is
-//! already known to be a polyvoxel.
+//! [`point`] is the base value; [`shift`], [`cylinder`], and [`paste`] are the
+//! three inductive constructions.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::box_construction::elementary_cylinder;
 use crate::poset::{FramedPoset, shift as shift_poset};
 use crate::pushout::{Pushout, paste_along_boundary};
 
-/// The point, as a shared shape suitable for further polyvoxel construction.
-pub fn point() -> Arc<FramedPoset> {
-    Arc::new(FramedPoset::point())
+/// An oriented framed poset known to be a polyvoxel.
+///
+/// The wrapped shape is immutable, and the field is private so that public code
+/// can obtain a `Polyvoxel` only from [`point`], [`shift`], [`cylinder`],
+/// [`paste`], or by cloning an existing value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Polyvoxel {
+    shape: Arc<FramedPoset>,
 }
 
-/// Shift every direction of a polyvoxel by one and return the result as a
-/// shared shape.
-///
-/// This assumes that `shape` is a polyvoxel.
-pub fn shift(shape: &Arc<FramedPoset>) -> Arc<FramedPoset> {
-    Arc::new(shift_poset(shape))
+impl Polyvoxel {
+    /// Access the shared underlying oriented framed poset.
+    pub fn as_framed_poset(&self) -> &Arc<FramedPoset> {
+        &self.shape
+    }
+}
+
+impl Deref for Polyvoxel {
+    type Target = FramedPoset;
+
+    fn deref(&self) -> &Self::Target {
+        &self.shape
+    }
+}
+
+impl AsRef<FramedPoset> for Polyvoxel {
+    fn as_ref(&self) -> &FramedPoset {
+        self
+    }
+}
+
+/// Construct the point polyvoxel.
+pub fn point() -> Polyvoxel {
+    Polyvoxel {
+        shape: Arc::new(FramedPoset::point()),
+    }
+}
+
+/// Shift every direction of a polyvoxel by one.
+pub fn shift(shape: &Polyvoxel) -> Polyvoxel {
+    Polyvoxel {
+        shape: Arc::new(shift_poset(shape)),
+    }
 }
 
 /// Construct an elementary cylinder with a voxel as its input.
 ///
-/// This assumes that both `input` and `output` are polyvoxels.
-///
-/// This checks that `input` has a greatest element. For a shape already known
-/// to be a polyvoxel, this is equivalent to being a voxel.
-pub fn cylinder(input: &Arc<FramedPoset>, output: &Arc<FramedPoset>) -> Arc<FramedPoset> {
+/// This checks that `input` has a greatest element, which for a polyvoxel is
+/// equivalent to being a voxel.
+pub fn cylinder(input: &Polyvoxel, output: &Polyvoxel) -> Polyvoxel {
     assert!(
         input.greatest_element().is_some(),
         "the elementary-cylinder input must be a voxel",
     );
-    elementary_cylinder(input, output)
+    Polyvoxel {
+        shape: elementary_cylinder(input.as_framed_poset(), output.as_framed_poset()),
+    }
 }
 
 /// Paste the output boundary of `left` to the input boundary of `right`.
 ///
-/// This assumes that both `left` and `right` are polyvoxels.
-///
-/// The returned pushout retains both canonical embeddings into the result.
-pub fn paste(left: &Arc<FramedPoset>, right: &Arc<FramedPoset>, direction: usize) -> Pushout {
-    paste_along_boundary(left, right, direction)
+/// The returned pushout contains the canonical embeddings of the operands. Its
+/// tip and the returned polyvoxel share the same underlying framed poset.
+/// These OFP embeddings are already morphisms of polyvoxels, so they need no
+/// separate wrapper type.
+pub fn paste(left: &Polyvoxel, right: &Polyvoxel, direction: usize) -> (Pushout, Polyvoxel) {
+    let pushout = paste_along_boundary(left.as_framed_poset(), right.as_framed_poset(), direction);
+    let polyvoxel = Polyvoxel {
+        shape: Arc::clone(&pushout.tip),
+    };
+    (pushout, polyvoxel)
 }
 
 #[cfg(test)]
@@ -54,13 +92,16 @@ mod tests {
         let point = point();
         let arrow = cylinder(&point, &point);
         let shifted_arrow = shift(&arrow);
-        let path = paste(&arrow, &arrow, 0);
+        let (path_pushout, path) = paste(&arrow, &arrow, 0);
 
         assert_eq!(point.sizes(), vec![1]);
         assert_eq!(arrow.sizes(), vec![2, 1]);
         assert_eq!(shifted_arrow.active_directions(), vec![1]);
-        assert_eq!(path.tip.sizes(), vec![3, 2]);
-        assert!(path.tip.greatest_element().is_none());
+        assert_eq!(path.sizes(), vec![3, 2]);
+        assert!(path.greatest_element().is_none());
+        assert!(Arc::ptr_eq(path.as_framed_poset(), &path_pushout.tip));
+        assert!(Arc::ptr_eq(&path_pushout.tip, &path_pushout.inl.cod));
+        assert!(Arc::ptr_eq(&path_pushout.tip, &path_pushout.inr.cod));
     }
 
     #[test]
@@ -68,7 +109,7 @@ mod tests {
     fn cylinder_rejects_a_polyvoxel_without_a_greatest_element() {
         let point = point();
         let arrow = cylinder(&point, &point);
-        let path = paste(&arrow, &arrow, 0).tip;
+        let (_, path) = paste(&arrow, &arrow, 0);
 
         let _ = cylinder(&path, &path);
     }

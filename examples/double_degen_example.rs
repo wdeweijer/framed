@@ -14,18 +14,16 @@ fn main() -> io::Result<()> {
     let e2 = shift(&e);
     let u2 = cylinder(&square, &e2);
 
-    let u = paste(&u1, &u2, 2).tip;
+    let (_, u) = paste(&u1, &u2, 2);
 
     let v1 = cylinder(&t2, &t2);
     let v2 = cylinder(&e2, &e2);
 
-    let v_pasting = paste(&v1, &v2, 2);
+    let (v_pasting, v) = paste(&v1, &v2, 2);
     let v2_into_v = v_pasting.inr;
-    let v = v_pasting.tip;
 
-    let w_pasting = paste(&u, &v, 0);
+    let (w_pasting, w) = paste(&u, &v, 0);
     let v_into_w = w_pasting.inr;
-    let w = w_pasting.tip;
 
     let witness = v2.greatest_element().expect("v2 must be a voxel");
     let witness = v2_into_v.apply(witness);
