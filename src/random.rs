@@ -1,12 +1,79 @@
 //! Random generation of oriented framed posets.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use rand::Rng;
+use rand::seq::SliceRandom;
 use rand::seq::index;
 
-use crate::intset::IntSet;
-use crate::poset::FramedPoset;
+use crate::embedding::Embedding;
+use crate::intset::{self, IntSet};
+use crate::poset::{FramedPoset, Sign};
+
+/// Randomly reorder the cells at every level of a framed poset.
+///
+/// The returned embedding is the relabelling isomorphism from the permuted OFP
+/// to `shape`; its forward map records the old position of every new cell.
+pub fn randomly_permute<R: Rng + ?Sized>(
+    shape: &Arc<FramedPoset>,
+    rng: &mut R,
+) -> (Arc<FramedPoset>, Embedding) {
+    let sizes = shape.sizes();
+    let new_to_old: Vec<Vec<usize>> = sizes
+        .iter()
+        .map(|&size| {
+            let mut level: Vec<_> = (0..size).collect();
+            level.shuffle(rng);
+            level
+        })
+        .collect();
+
+    let mut old_to_new: Vec<Vec<usize>> = sizes.iter().map(|&size| vec![0; size]).collect();
+    for (dim, level) in new_to_old.iter().enumerate() {
+        for (new_pos, &old_pos) in level.iter().enumerate() {
+            old_to_new[dim][old_pos] = new_pos;
+        }
+    }
+
+    let mut basis = Vec::with_capacity(sizes.len());
+    let mut faces_in = Vec::with_capacity(sizes.len());
+    let mut faces_out = Vec::with_capacity(sizes.len());
+    for (dim, level) in new_to_old.iter().enumerate() {
+        basis.push(
+            level
+                .iter()
+                .map(|&old_pos| shape.basis_of(dim, old_pos).clone())
+                .collect(),
+        );
+        if dim == 0 {
+            faces_in.push(vec![vec![]; level.len()]);
+            faces_out.push(vec![vec![]; level.len()]);
+            continue;
+        }
+
+        let remap_faces = |sign| {
+            level
+                .iter()
+                .map(|&old_pos| {
+                    intset::collect_sorted(
+                        shape
+                            .faces_of(sign, dim, old_pos)
+                            .iter()
+                            .map(|&old_face| old_to_new[dim - 1][old_face]),
+                    )
+                })
+                .collect()
+        };
+        faces_in.push(remap_faces(Sign::Input));
+        faces_out.push(remap_faces(Sign::Output));
+    }
+
+    let permuted = Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out));
+    let isomorphism = Embedding::from_map(Arc::clone(&permuted), Arc::clone(shape), new_to_old);
+    debug_assert!(isomorphism.is_isomorphism());
+    (permuted, isomorphism)
+}
 
 /// Reusable generator for finite oriented framed posets.
 ///
@@ -306,6 +373,34 @@ mod tests {
     use rand::rngs::SmallRng;
 
     use super::*;
+
+    #[test]
+    fn random_permutation_returns_an_explicit_isomorphism() {
+        let arrow = Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![1]]],
+        ));
+        let mut rng = SmallRng::seed_from_u64(0xce_11_0a_de);
+
+        let (permuted, into_arrow) = randomly_permute(&arrow, &mut rng);
+
+        assert!(into_arrow.is_isomorphism());
+        assert!(Arc::ptr_eq(&permuted, &into_arrow.dom));
+        assert!(Arc::ptr_eq(&arrow, &into_arrow.cod));
+    }
+
+    #[test]
+    fn random_permutation_is_the_identity_when_no_reordering_is_possible() {
+        let point = Arc::new(FramedPoset::point());
+        let mut rng = SmallRng::seed_from_u64(0x0009_01a7);
+
+        let (permuted, into_point) = randomly_permute(&point, &mut rng);
+
+        assert!(FramedPoset::equal(&point, &permuted));
+        assert_eq!(into_point.map, vec![vec![0]]);
+        assert!(into_point.is_isomorphism());
+    }
 
     #[test]
     fn generates_well_formed_posets_in_arbitrary_small_dimensions() {

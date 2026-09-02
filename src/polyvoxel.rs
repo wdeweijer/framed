@@ -7,6 +7,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::box_construction::elementary_cylinder;
+use crate::embedding::Embedding;
 use crate::poset::{FramedPoset, shift as shift_poset};
 use crate::pushout::{Pushout, paste_along_boundary};
 
@@ -14,7 +15,7 @@ use crate::pushout::{Pushout, paste_along_boundary};
 ///
 /// The wrapped shape is immutable, and the field is private so that public code
 /// can obtain a `Polyvoxel` only from [`point`], [`shift`], [`cylinder`],
-/// [`paste`], or by cloning an existing value.
+/// [`paste`], [`Polyvoxel::from_isomorphism`], or by cloning an existing value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Polyvoxel {
     shape: Arc<FramedPoset>,
@@ -59,6 +60,36 @@ impl Polyvoxel {
     /// Whether this polyvoxel is a voxel.
     pub fn is_voxel(&self) -> bool {
         self.layering_direction.is_none()
+    }
+
+    /// Regard an isomorphic OFP as a polyvoxel.
+    ///
+    /// `isomorphism` must have `shape` as its domain and `known_polyvoxel` as
+    /// its codomain. Length and layering direction are intrinsic, so they are
+    /// transported unchanged from `known_polyvoxel`.
+    pub fn from_isomorphism(
+        shape: Arc<FramedPoset>,
+        isomorphism: &Embedding,
+        known_polyvoxel: &Self,
+    ) -> Self {
+        assert!(
+            FramedPoset::equal(&shape, &isomorphism.dom),
+            "the supplied OFP must be the domain of the isomorphism",
+        );
+        assert!(
+            FramedPoset::equal(known_polyvoxel.as_framed_poset(), &isomorphism.cod),
+            "the known polyvoxel must be the codomain of the isomorphism",
+        );
+        assert!(
+            isomorphism.is_isomorphism(),
+            "the supplied embedding must be an isomorphism",
+        );
+
+        Self {
+            shape,
+            length: known_polyvoxel.length.clone(),
+            layering_direction: known_polyvoxel.layering_direction,
+        }
     }
 }
 
@@ -160,6 +191,9 @@ pub fn paste(left: &Polyvoxel, right: &Polyvoxel, direction: usize) -> (Pushout,
 mod tests {
     use super::*;
     use crate::poset::{polyvoxel_layering_direction, polyvoxel_length};
+    use crate::random::randomly_permute;
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
 
     fn assert_cached_metadata_matches_shape(polyvoxel: &Polyvoxel) {
         assert_eq!(
@@ -254,5 +288,40 @@ mod tests {
         let point = point();
 
         let _ = paste(&point, &point, 0);
+    }
+
+    #[test]
+    fn isomorphism_transports_polyvoxel_structure_and_metadata() {
+        let square = square_for_test();
+        let (_, rectangle) = paste(&square, &square, 0);
+        let mut rng = SmallRng::seed_from_u64(0x1500_40f0_5e70_0001);
+        let (permuted_shape, into_rectangle) =
+            randomly_permute(rectangle.as_framed_poset(), &mut rng);
+        let expected_shape = Arc::clone(&permuted_shape);
+
+        let permuted = Polyvoxel::from_isomorphism(permuted_shape, &into_rectangle, &rectangle);
+
+        assert!(Arc::ptr_eq(permuted.as_framed_poset(), &expected_shape));
+        assert_eq!(permuted.length(), rectangle.length());
+        assert_eq!(
+            permuted.layering_direction(),
+            rectangle.layering_direction()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the supplied embedding must be an isomorphism")]
+    fn isomorphism_transport_rejects_a_non_isomorphism() {
+        let known_polyvoxel = point();
+        let shape = Arc::new(FramedPoset::empty());
+        let embedding = Embedding::empty(Arc::clone(known_polyvoxel.as_framed_poset()));
+
+        let _ = Polyvoxel::from_isomorphism(shape, &embedding, &known_polyvoxel);
+    }
+
+    fn square_for_test() -> Polyvoxel {
+        let point = point();
+        let arrow = cylinder(&point, &point);
+        cylinder(&arrow, &arrow)
     }
 }
