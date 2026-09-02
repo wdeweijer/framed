@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plain browser smoke test</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="plain-page">
+    <main class="plain-test">
+      <div class="ready-light" aria-hidden="true"></div>
+      <h1>Hello, browser.</h1>
+      <p id="plain-status">HTML and CSS loaded. Checking JavaScript...</p>
+      <a href="/">Open the OFP viewer</a>
+    </main>
+    <script>
+      document.documentElement.dataset.ready = "true";
+      document.getElementById("plain-status").textContent =
+        "HTML, CSS, and JavaScript are working.";
+    </script>
+  </body>
+</html>

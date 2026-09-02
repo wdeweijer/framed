@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OFP pasting viewer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="identity">
+        <h1>OFP pasting viewer</h1>
+        <p id="source-name">Standard 3-cube</p>
+      </div>
+      <div class="commands" aria-label="Viewer commands">
+        <button id="play-pause" type="button">Pause</button>
+        <button id="step" type="button">Step</button>
+        <button id="restart" type="button">Restart</button>
+        <button id="reset-view" type="button">Reset view</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="viewport-shell" aria-label="Interactive OFP viewport">
+        <div id="viewport"></div>
+        <div id="tooltip" class="tooltip" hidden></div>
+        <div class="viewport-status" aria-live="polite">
+          <span id="frame-stat">Frame 0</span>
+          <span id="energy-stat">Energy 0</span>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Viewer controls">
+        <section>
+          <h2>Shape</h2>
+          <dl class="shape-summary">
+            <div><dt>Dimension</dt><dd id="dimension-stat">3</dd></div>
+            <div><dt>Points</dt><dd id="point-stat">8</dd></div>
+            <div><dt>Arrows</dt><dd id="edge-stat">12</dd></div>
+            <div><dt>Surfaces</dt><dd id="surface-stat">6</dd></div>
+          </dl>
+          <div id="direction-legend" class="direction-legend"></div>
+        </section>
+
+        <section>
+          <h2>Projection</h2>
+          <div id="projection-controls" class="projection-controls"></div>
+          <button id="random-projection" class="wide-command" type="button">
+            Randomize projected
+          </button>
+        </section>
+
+        <section>
+          <h2>Simulation</h2>
+          <div class="range-control">
+            <label for="edge-length">Edge length</label>
+            <output id="edge-length-out"></output>
+            <input id="edge-length" type="range" min="0.5" max="4" step="0.05">
+          </div>
+          <div class="range-control">
+            <label for="compression">Compression</label>
+            <output id="compression-out"></output>
+            <input id="compression" type="range" min="0" max="0.15" step="0.002">
+          </div>
+          <div class="range-control">
+            <label for="extension">Extension</label>
+            <output id="extension-out"></output>
+            <input id="extension" type="range" min="0" max="0.08" step="0.001">
+          </div>
+          <div class="range-control">
+            <label for="angle-force">Angle force</label>
+            <output id="angle-force-out"></output>
+            <input id="angle-force" type="range" min="0" max="0.15" step="0.002">
+          </div>
+          <div class="range-control">
+            <label for="triangular-angle-force">Triangular angle force</label>
+            <output id="triangular-angle-force-out"></output>
+            <input id="triangular-angle-force" type="range" min="0" max="0.15" step="0.002">
+          </div>
+          <div class="range-control">
+            <label for="repulsion">Repulsion</label>
+            <output id="repulsion-out"></output>
+            <input id="repulsion" type="range" min="0" max="0.15" step="0.002">
+          </div>
+          <div class="range-control">
+            <label for="damping">Damping</label>
+            <output id="damping-out"></output>
+            <input id="damping" type="range" min="0.1" max="0.95" step="0.01">
+          </div>
+          <div class="range-control">
+            <label for="steps-per-frame">Steps per frame</label>
+            <output id="steps-per-frame-out">4</output>
+            <input id="steps-per-frame" type="range" min="1" max="20" step="1" value="4">
+          </div>
+          <div class="range-control">
+            <label for="surface-opacity">Surface opacity</label>
+            <output id="surface-opacity-out">0.20</output>
+            <input id="surface-opacity" type="range" min="0" max="0.6" step="0.01" value="0.2">
+          </div>
+        </section>
+
+        <section>
+          <h2>Load</h2>
+          <div class="load-row">
+            <select id="cube-dimension" aria-label="Standard cube dimension">
+              <option value="1">1-cube</option>
+              <option value="2">2-cube</option>
+              <option value="3" selected>3-cube</option>
+              <option value="4">4-cube</option>
+              <option value="5">5-cube</option>
+            </select>
+            <button id="load-cube" type="button">Load cube</button>
+          </div>
+          <label class="file-button">
+            Open OFP JSON
+            <input id="data-file" type="file" accept="application/json,.json">
+          </label>
+          <textarea id="json-text" rows="7" spellcheck="false" aria-label="OFP JSON"></textarea>
+          <button id="load-json" type="button">Load JSON text</button>
+          <p id="status" class="status" role="status">Ready</p>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
