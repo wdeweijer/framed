@@ -15,7 +15,9 @@ use crate::pushout::{Pushout, paste_along_boundary};
 ///
 /// The wrapped shape is immutable, and the field is private so that public code
 /// can obtain a `Polyvoxel` only from [`point`], [`shift`], [`cylinder`],
-/// [`paste`], [`Polyvoxel::from_isomorphism`], or by cloning an existing value.
+/// [`paste`], certified transport along [`Polyvoxel::from_isomorphism`], or by
+/// cloning an existing value. These operations form the trusted kernel for
+/// polyvoxelhood.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Polyvoxel {
     shape: Arc<FramedPoset>,
@@ -146,12 +148,12 @@ pub fn cylinder(input: &Polyvoxel, output: &Polyvoxel) -> Polyvoxel {
         input.is_voxel(),
         "the elementary-cylinder input must be a voxel",
     );
-    let length = std::iter::once(1)
-        .chain(input.length.iter().copied())
-        .collect();
+    let shape = elementary_cylinder(input.as_framed_poset(), output.as_framed_poset());
     Polyvoxel {
-        shape: elementary_cylinder(input.as_framed_poset(), output.as_framed_poset()),
-        length,
+        shape,
+        length: std::iter::once(1)
+            .chain(input.length.iter().copied())
+            .collect(),
         layering_direction: None,
     }
 }

@@ -34,6 +34,27 @@ pub fn normalize(shape: &FramedPoset) -> FramedPoset {
         return shape.clone();
     }
 
+    recompute_normalisation(shape).0
+}
+
+/// Return the graph-based canonical form and its isomorphism into `shape`.
+///
+/// The embedding's forward map records the old position of every cell in the
+/// canonical presentation. This is useful when a canonical form is used as an
+/// index but a concrete isomorphism between two indexed shapes is also needed.
+pub fn normalisation(shape: &Arc<FramedPoset>) -> (Arc<FramedPoset>, Embedding) {
+    if shape.is_normal() {
+        return (Arc::clone(shape), Embedding::id(Arc::clone(shape)));
+    }
+
+    let (normal, new_to_old) = recompute_normalisation(shape);
+    let normal = Arc::new(normal);
+    let into_shape = Embedding::from_map(Arc::clone(&normal), Arc::clone(shape), new_to_old);
+    debug_assert!(into_shape.is_isomorphism());
+    (normal, into_shape)
+}
+
+fn recompute_normalisation(shape: &FramedPoset) -> (FramedPoset, Vec<Vec<usize>>) {
     let canonical = CanonicalGraph::new(shape);
     let permutation = canonical.permutation();
     let sizes = shape.sizes();
@@ -96,7 +117,7 @@ pub fn normalize(shape: &FramedPoset) -> FramedPoset {
     let mut normalized = FramedPoset::from_faces(basis, faces_in, faces_out);
     normalized.normal = true;
     debug_assert!(vf2_isomorphic(shape, &normalized));
-    normalized
+    (normalized, new_to_old)
 }
 
 /// Test whether two framed posets are isomorphic.
@@ -474,6 +495,18 @@ mod tests {
         assert!(FramedPoset::equal(&normal_source, &normal_again));
         assert!(vf2_isomorphic(&source, &normal_source));
         assert!(vf2_isomorphic(&reordered, &normal_reordered));
+    }
+
+    #[test]
+    fn normalisation_returns_the_canonical_relabelling() {
+        let shape = arrow_with_reordered_vertices();
+        let (normal, into_shape) = normalisation(&shape);
+
+        assert!(normal.is_normal());
+        assert_eq!(normal.as_ref(), &normalize(&shape));
+        assert!(into_shape.is_isomorphism());
+        assert_eq!(into_shape.dom.as_ref(), normal.as_ref());
+        assert_eq!(into_shape.cod.as_ref(), shape.as_ref());
     }
 
     #[test]

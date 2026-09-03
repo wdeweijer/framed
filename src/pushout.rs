@@ -64,8 +64,8 @@ pub fn paste_along_boundary(
     second: &Arc<FramedPoset>,
     direction: usize,
 ) -> Pushout {
-    let (output_boundary, output_into_first) = boundary(Sign::Output, direction, first);
-    let (input_boundary, input_into_second) = boundary(Sign::Input, direction, second);
+    let (output_boundary, _) = boundary(Sign::Output, direction, first);
+    let (input_boundary, _) = boundary(Sign::Input, direction, second);
 
     let mut boundary_isomorphisms = isomorphisms(&output_boundary, &input_boundary);
     assert_eq!(
@@ -75,8 +75,39 @@ pub fn paste_along_boundary(
     );
 
     let boundary_isomorphism = boundary_isomorphisms.pop().unwrap();
-    let output_into_second = Embedding::compose(&boundary_isomorphism, &input_into_second);
-    debug_assert!(Arc::ptr_eq(&output_into_first.dom, &output_into_second.dom));
+    paste_along_boundary_isomorphism(first, second, direction, &boundary_isomorphism)
+}
+
+/// Paste two framed posets using a specified directional-boundary isomorphism.
+///
+/// `boundary_isomorphism` must map the output `direction` boundary of `first`
+/// to the input `direction` boundary of `second`.
+pub fn paste_along_boundary_isomorphism(
+    first: &Arc<FramedPoset>,
+    second: &Arc<FramedPoset>,
+    direction: usize,
+    boundary_isomorphism: &Embedding,
+) -> Pushout {
+    let (output_boundary, output_into_first) = boundary(Sign::Output, direction, first);
+    let (input_boundary, input_into_second) = boundary(Sign::Input, direction, second);
+    assert!(
+        boundary_isomorphism.is_isomorphism(),
+        "the supplied boundary embedding must be an isomorphism",
+    );
+    assert!(
+        FramedPoset::equal(&output_boundary, &boundary_isomorphism.dom),
+        "the isomorphism domain must be the output boundary of the first OFP",
+    );
+    assert!(
+        FramedPoset::equal(&input_boundary, &boundary_isomorphism.cod),
+        "the isomorphism codomain must be the input boundary of the second OFP",
+    );
+
+    let output_into_second = Embedding::compose(boundary_isomorphism, &input_into_second);
+    debug_assert!(FramedPoset::equal(
+        &output_into_first.dom,
+        &output_into_second.dom,
+    ));
 
     pushout(&output_into_first, &output_into_second)
 }

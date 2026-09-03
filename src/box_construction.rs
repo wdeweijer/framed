@@ -214,6 +214,15 @@ pub fn elementary_cylinder(
         );
     }
 
+    elementary_cylinder_from_compatible(input, output)
+}
+
+/// Construct an elementary cylinder whose defining compatibility conditions
+/// have already been checked by the caller.
+fn elementary_cylinder_from_compatible(
+    input: &Arc<FramedPoset>,
+    output: &Arc<FramedPoset>,
+) -> Arc<FramedPoset> {
     elementary_cylinder_recursive(input, output)
 }
 
