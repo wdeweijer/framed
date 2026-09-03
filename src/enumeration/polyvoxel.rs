@@ -7,7 +7,7 @@
 //! choices.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -130,6 +130,7 @@ pub struct PolyvoxelEnumerationProgress {
 /// A separately timed stage of polyvoxel enumeration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PolyvoxelEnumerationStage {
+    BoundaryIndexing,
     Shift,
     CylinderMatching,
     Cylinder,
@@ -229,10 +230,18 @@ pub fn enumerate_polyvoxels_profiled(
         length_bound,
     )
     .expect("the point must fit every polyvoxel catalogue");
-    builder.record(initial);
+    let initial = builder.record(initial);
+    debug_assert!(initial.new_entry);
+    debug_assert!(initial.new_voxel);
+    let mut entry_frontier = vec![initial.index];
+    let mut voxel_frontier = vec![initial.index];
+    let mut boundary_index = BoundaryIndex::default();
+    let mut processed_jobs = ProcessedJobs::default();
     let cache_started = Instant::now();
     let cached_boundaries = builder.uncached_entry_count();
-    builder.populate_boundary_caches();
+    if cached_boundaries > 0 {
+        builder.populate_boundary_caches();
+    }
     report_timing(stage_timing(
         0,
         PolyvoxelEnumerationStage::BoundaryCaching,
@@ -241,18 +250,29 @@ pub fn enumerate_polyvoxels_profiled(
     ));
 
     loop {
-        let entries = builder.snapshot();
-        let voxels: Vec<_> = entries
-            .iter()
-            .enumerate()
-            .filter_map(|(index, entry)| entry.is_voxel.then_some(index))
-            .collect();
-        let mut changed = false;
         let round = builder.round;
+        let indexing_started = Instant::now();
+        let entries = builder.snapshot();
+        let indexed_entries =
+            boundary_index.add_entries(&entries, &entry_frontier, allowed_directions);
+        let indexed_voxels =
+            boundary_index.add_voxels(&entries, &voxel_frontier, allowed_directions);
+        report_timing(stage_timing(
+            round,
+            PolyvoxelEnumerationStage::BoundaryIndexing,
+            indexed_entries + indexed_voxels,
+            indexing_started.elapsed(),
+        ));
+
+        let shift_jobs: Vec<_> = voxel_frontier
+            .iter()
+            .copied()
+            .filter(|source| processed_jobs.shifts.insert(*source))
+            .collect();
 
         let shift = process_jobs(
             &mut builder,
-            &voxels,
+            &shift_jobs,
             round,
             PolyvoxelEnumerationPhase::Shift,
             &mut report,
@@ -262,12 +282,18 @@ pub fn enumerate_polyvoxels_profiled(
                 factorization: PolyvoxelFactorization::Shift { source },
             },
         );
-        changed |= shift.changed;
-        report_timing(shift.timing(round, PolyvoxelEnumerationStage::Shift, voxels.len()));
+        report_timing(shift.timing(round, PolyvoxelEnumerationStage::Shift, shift_jobs.len()));
 
         let matching_started = Instant::now();
-        let cylinder_jobs =
-            compatible_cylinder_jobs(&entries, &voxels, allowed_directions, length_bound);
+        let cylinder_jobs = compatible_cylinder_jobs(
+            &entries,
+            &boundary_index,
+            &entry_frontier,
+            &voxel_frontier,
+            allowed_directions,
+            length_bound,
+            &mut processed_jobs.cylinders,
+        );
         report_timing(stage_timing(
             round,
             PolyvoxelEnumerationStage::CylinderMatching,
@@ -289,7 +315,6 @@ pub fn enumerate_polyvoxels_profiled(
                 },
             },
         );
-        changed |= cylinder.changed;
         report_timing(cylinder.timing(
             round,
             PolyvoxelEnumerationStage::Cylinder,
@@ -297,7 +322,14 @@ pub fn enumerate_polyvoxels_profiled(
         ));
 
         let matching_started = Instant::now();
-        let paste_jobs = compatible_paste_jobs(&entries, max_cells, length_bound);
+        let paste_jobs = compatible_paste_jobs(
+            &entries,
+            &boundary_index,
+            &entry_frontier,
+            max_cells,
+            length_bound,
+            &mut processed_jobs.pastes,
+        );
         report_timing(stage_timing(
             round,
             PolyvoxelEnumerationStage::PasteMatching,
@@ -334,12 +366,20 @@ pub fn enumerate_polyvoxels_profiled(
                 }
             },
         );
-        changed |= paste.changed;
         report_timing(paste.timing(round, PolyvoxelEnumerationStage::Paste, paste_jobs.len()));
+
+        let mut next_entries = BTreeSet::new();
+        let mut next_voxels = BTreeSet::new();
+        for processing in [&shift, &cylinder, &paste] {
+            next_entries.extend(processing.new_entries.iter().copied());
+            next_voxels.extend(processing.new_voxels.iter().copied());
+        }
 
         let cache_started = Instant::now();
         let cached_boundaries = builder.uncached_entry_count();
-        builder.populate_boundary_caches();
+        if cached_boundaries > 0 {
+            builder.populate_boundary_caches();
+        }
         report_timing(stage_timing(
             round,
             PolyvoxelEnumerationStage::BoundaryCaching,
@@ -347,7 +387,7 @@ pub fn enumerate_polyvoxels_profiled(
             cache_started.elapsed(),
         ));
 
-        if !changed {
+        if next_entries.is_empty() && next_voxels.is_empty() {
             report(PolyvoxelEnumerationProgress {
                 round,
                 phase: PolyvoxelEnumerationPhase::Complete,
@@ -358,6 +398,8 @@ pub fn enumerate_polyvoxels_profiled(
             });
             return builder.finish();
         }
+        entry_frontier = next_entries.into_iter().collect();
+        voxel_frontier = next_voxels.into_iter().collect();
         builder.round += 1;
     }
 }
@@ -418,7 +460,8 @@ where
     let max_cells = builder.max_cells;
     let allowed_directions = builder.allowed_directions.clone();
     let length_bound = builder.length_bound;
-    let mut changed = false;
+    let mut new_entries = BTreeSet::new();
+    let mut new_voxels = BTreeSet::new();
     let mut construction_work = Duration::ZERO;
     let mut canonicalisation_work = Duration::ZERO;
     let mut merge_time = Duration::ZERO;
@@ -442,7 +485,13 @@ where
             construction_work += construction_time;
             canonicalisation_work += canonicalisation_time;
             if let Some(candidate) = candidate {
-                changed |= builder.record(candidate);
+                let outcome = builder.record(candidate);
+                if outcome.new_entry {
+                    new_entries.insert(outcome.index);
+                }
+                if outcome.new_voxel {
+                    new_voxels.insert(outcome.index);
+                }
             }
         }
         merge_time += merge_started.elapsed();
@@ -452,7 +501,8 @@ where
     }
 
     JobProcessing {
-        changed,
+        new_entries,
+        new_voxels,
         wall_time: wall_started.elapsed(),
         construction_work,
         canonicalisation_work,
@@ -461,7 +511,8 @@ where
 }
 
 struct JobProcessing {
-    changed: bool,
+    new_entries: BTreeSet<usize>,
+    new_voxels: BTreeSet<usize>,
     wall_time: Duration,
     construction_work: Duration,
     canonicalisation_work: Duration,
@@ -487,7 +538,93 @@ impl JobProcessing {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default)]
+struct ProcessedJobs {
+    shifts: HashSet<usize>,
+    cylinders: HashSet<CylinderJob>,
+    pastes: HashSet<PasteJob>,
+}
+
+type CylinderBoundaryKey = (u64, u64);
+type SignedBoundaryKey = (usize, u64);
+
+#[derive(Default)]
+struct BoundaryIndex {
+    indexed_entries: HashSet<usize>,
+    indexed_voxels: HashSet<usize>,
+    cylinder_outputs: HashMap<CylinderBoundaryKey, Vec<usize>>,
+    cylinder_inputs: HashMap<CylinderBoundaryKey, Vec<usize>>,
+    paste_inputs: HashMap<SignedBoundaryKey, Vec<usize>>,
+    paste_outputs: HashMap<SignedBoundaryKey, Vec<usize>>,
+}
+
+impl BoundaryIndex {
+    fn add_entries(
+        &mut self,
+        entries: &[SnapshotEntry],
+        new_entries: &[usize],
+        allowed_directions: &[usize],
+    ) -> usize {
+        let cylinder_enabled = allowed_directions.binary_search(&0).is_ok();
+        let mut added = 0;
+        for &index in new_entries {
+            if !self.indexed_entries.insert(index) {
+                continue;
+            }
+            added += 1;
+            let entry = &entries[index];
+            if cylinder_enabled {
+                self.cylinder_outputs
+                    .entry(cylinder_boundary_key(entry))
+                    .or_default()
+                    .push(index);
+            }
+            for &direction in &entry.frame {
+                let boundary = entry.boundary(direction);
+                self.paste_inputs
+                    .entry((direction, boundary.input().hash))
+                    .or_default()
+                    .push(index);
+                self.paste_outputs
+                    .entry((direction, boundary.output().hash))
+                    .or_default()
+                    .push(index);
+            }
+        }
+        added
+    }
+
+    fn add_voxels(
+        &mut self,
+        entries: &[SnapshotEntry],
+        new_voxels: &[usize],
+        allowed_directions: &[usize],
+    ) -> usize {
+        let cylinder_enabled = allowed_directions.binary_search(&0).is_ok();
+        let mut added = 0;
+        for &index in new_voxels {
+            if !self.indexed_voxels.insert(index) {
+                continue;
+            }
+            debug_assert!(entries[index].is_voxel);
+            added += 1;
+            if cylinder_enabled {
+                self.cylinder_inputs
+                    .entry(cylinder_boundary_key(&entries[index]))
+                    .or_default()
+                    .push(index);
+            }
+        }
+        added
+    }
+}
+
+fn cylinder_boundary_key(entry: &SnapshotEntry) -> CylinderBoundaryKey {
+    let boundary = entry.boundary(0);
+    (boundary.input().hash, boundary.output().hash)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct CylinderJob {
     input: usize,
     output: usize,
@@ -495,46 +632,66 @@ struct CylinderJob {
 
 fn compatible_cylinder_jobs(
     entries: &[SnapshotEntry],
-    voxels: &[usize],
+    boundary_index: &BoundaryIndex,
+    new_entries: &[usize],
+    new_voxels: &[usize],
     allowed_directions: &[usize],
     length_bound: Option<usize>,
+    processed: &mut HashSet<CylinderJob>,
 ) -> Vec<CylinderJob> {
     if allowed_directions.binary_search(&0).is_err() || length_bound.is_some_and(|bound| 1 >= bound)
     {
         return vec![];
     }
 
-    let mut outputs_by_hash = HashMap::<(u64, u64), Vec<usize>>::new();
-    for (output, entry) in entries.iter().enumerate() {
-        let boundary = entry.boundary(0);
-        outputs_by_hash
-            .entry((boundary.input().hash, boundary.output().hash))
-            .or_default()
-            .push(output);
-    }
-
     let mut jobs = Vec::new();
-    for &input in voxels {
-        let input_entry = &entries[input];
-        let boundary = input_entry.boundary(0);
-        let key = (boundary.input().hash, boundary.output().hash);
-        let Some(outputs) = outputs_by_hash.get(&key) else {
-            continue;
-        };
-
-        for &output in outputs {
-            let output_entry = &entries[output];
-            let output_boundary = output_entry.boundary(0);
-            if cylinder_frames_compatible(input_entry, output_entry)
-                && boundary.input().same_normal_form(output_boundary.input())
-                && boundary.output().same_normal_form(output_boundary.output())
-            {
-                jobs.push(CylinderJob { input, output });
+    for &input in new_voxels {
+        if let Some(outputs) = boundary_index
+            .cylinder_outputs
+            .get(&cylinder_boundary_key(&entries[input]))
+        {
+            for &output in outputs {
+                push_cylinder_job_if_compatible(entries, input, output, &mut jobs);
+            }
+        }
+    }
+    for &output in new_entries {
+        if let Some(inputs) = boundary_index
+            .cylinder_inputs
+            .get(&cylinder_boundary_key(&entries[output]))
+        {
+            for &input in inputs {
+                push_cylinder_job_if_compatible(entries, input, output, &mut jobs);
             }
         }
     }
 
+    jobs.sort_unstable();
+    jobs.dedup();
+    jobs.retain(|job| processed.insert(*job));
     jobs
+}
+
+fn push_cylinder_job_if_compatible(
+    entries: &[SnapshotEntry],
+    input: usize,
+    output: usize,
+    jobs: &mut Vec<CylinderJob>,
+) {
+    let input_entry = &entries[input];
+    let output_entry = &entries[output];
+    let input_boundary = input_entry.boundary(0);
+    let output_boundary = output_entry.boundary(0);
+    if cylinder_frames_compatible(input_entry, output_entry)
+        && input_boundary
+            .input()
+            .same_normal_form(output_boundary.input())
+        && input_boundary
+            .output()
+            .same_normal_form(output_boundary.output())
+    {
+        jobs.push(CylinderJob { input, output });
+    }
 }
 
 fn cylinder_frames_compatible(input: &SnapshotEntry, output: &SnapshotEntry) -> bool {
@@ -548,7 +705,7 @@ fn cylinder_frames_compatible(input: &SnapshotEntry, output: &SnapshotEntry) -> 
         && intset::is_subset(&output.frame, &input.frame)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct PasteJob {
     direction: usize,
     left: usize,
@@ -557,52 +714,96 @@ struct PasteJob {
 
 fn compatible_paste_jobs(
     entries: &[SnapshotEntry],
+    boundary_index: &BoundaryIndex,
+    new_entries: &[usize],
     max_cells: usize,
     length_bound: Option<usize>,
+    processed: &mut HashSet<PasteJob>,
 ) -> Vec<PasteJob> {
-    let mut inputs_by_hash = HashMap::<(usize, u64), Vec<usize>>::new();
-    for (right, entry) in entries.iter().enumerate() {
-        for &direction in &entry.frame {
-            inputs_by_hash
-                .entry((direction, entry.boundary(direction).input().hash))
-                .or_default()
-                .push(right);
-        }
-    }
-
     let mut jobs = Vec::new();
-    for (left, left_entry) in entries.iter().enumerate() {
+    for &left in new_entries {
+        let left_entry = &entries[left];
         for &direction in &left_entry.frame {
             let left_boundary = left_entry.boundary(direction).output();
-            let Some(rights) = inputs_by_hash.get(&(direction, left_boundary.hash)) else {
-                continue;
-            };
-
-            for &right in rights {
-                let right_boundary = entries[right].boundary(direction).input();
-                let result_length = left_entry
-                    .shape
-                    .length_at(direction)
-                    .saturating_add(entries[right].shape.length_at(direction));
-                let result_cells = left_entry
-                    .cells
-                    .saturating_add(entries[right].cells)
-                    .saturating_sub(left_boundary.cells);
-                if result_cells <= max_cells
-                    && length_bound.is_none_or(|bound| result_length < bound)
-                    && left_boundary.same_normal_form(right_boundary)
-                {
-                    jobs.push(PasteJob {
+            if let Some(rights) = boundary_index
+                .paste_inputs
+                .get(&(direction, left_boundary.hash))
+            {
+                for &right in rights {
+                    push_paste_job_if_compatible(
+                        entries,
                         direction,
                         left,
                         right,
-                    });
+                        max_cells,
+                        length_bound,
+                        &mut jobs,
+                    );
                 }
             }
         }
     }
+
+    for &right in new_entries {
+        let right_entry = &entries[right];
+        for &direction in &right_entry.frame {
+            let right_boundary = right_entry.boundary(direction).input();
+            if let Some(lefts) = boundary_index
+                .paste_outputs
+                .get(&(direction, right_boundary.hash))
+            {
+                for &left in lefts {
+                    push_paste_job_if_compatible(
+                        entries,
+                        direction,
+                        left,
+                        right,
+                        max_cells,
+                        length_bound,
+                        &mut jobs,
+                    );
+                }
+            }
+        }
+    }
+
     jobs.sort_unstable_by_key(|job| (job.left, job.right, job.direction));
+    jobs.dedup();
+    jobs.retain(|job| processed.insert(*job));
     jobs
+}
+
+fn push_paste_job_if_compatible(
+    entries: &[SnapshotEntry],
+    direction: usize,
+    left: usize,
+    right: usize,
+    max_cells: usize,
+    length_bound: Option<usize>,
+    jobs: &mut Vec<PasteJob>,
+) {
+    let left_entry = &entries[left];
+    let right_entry = &entries[right];
+    let left_boundary = left_entry.boundary(direction).output();
+    let right_boundary = right_entry.boundary(direction).input();
+    let result_length = left_entry
+        .shape
+        .length_at(direction)
+        .saturating_add(right_entry.shape.length_at(direction));
+    let result_cells = left_entry
+        .cells
+        .saturating_add(right_entry.cells)
+        .saturating_sub(left_boundary.cells);
+    if result_cells <= max_cells
+        && length_bound.is_none_or(|bound| result_length < bound)
+        && left_boundary.same_normal_form(right_boundary)
+    {
+        jobs.push(PasteJob {
+            direction,
+            left,
+            right,
+        });
+    }
 }
 
 struct Candidate {
@@ -709,7 +910,7 @@ struct SnapshotEntry {
     is_voxel: bool,
     cells: usize,
     frame: IntSet,
-    boundaries: Vec<DirectionalBoundaryCache>,
+    boundaries: Arc<Vec<DirectionalBoundaryCache>>,
 }
 
 impl SnapshotEntry {
@@ -735,9 +936,17 @@ fn cell_count(shape: &FramedPoset) -> usize {
 struct WorkingEntry {
     shape: Polyvoxel,
     canonical_shape: Arc<FramedPoset>,
-    boundaries: Option<Vec<DirectionalBoundaryCache>>,
+    cells: usize,
+    frame: IntSet,
+    boundaries: Option<Arc<Vec<DirectionalBoundaryCache>>>,
     is_voxel: bool,
     factorizations: BTreeSet<PolyvoxelFactorization>,
+}
+
+struct RecordOutcome {
+    index: usize,
+    new_entry: bool,
+    new_voxel: bool,
 }
 
 struct CatalogBuilder {
@@ -775,7 +984,7 @@ impl CatalogBuilder {
             .count()
     }
 
-    fn record(&mut self, candidate: PreparedCandidate) -> bool {
+    fn record(&mut self, candidate: PreparedCandidate) -> RecordOutcome {
         let PreparedCandidate {
             shape,
             canonical_shape,
@@ -786,21 +995,34 @@ impl CatalogBuilder {
             let entry = &mut self.entries[index];
             let became_voxel = is_voxel && !entry.is_voxel;
             entry.is_voxel |= is_voxel;
-            return became_voxel || entry.factorizations.insert(factorization);
+            entry.factorizations.insert(factorization);
+            return RecordOutcome {
+                index,
+                new_entry: false,
+                new_voxel: became_voxel,
+            };
         }
 
         debug_assert!(shape.well_formed());
         debug_assert!(is_volumetric(shape.as_framed_poset()));
+        let cells = cell_count(&shape);
+        let frame = shape.active_directions();
         let index = self.entries.len();
         self.indices.insert(Arc::clone(&canonical_shape), index);
         self.entries.push(WorkingEntry {
             shape,
             canonical_shape,
+            cells,
+            frame,
             boundaries: None,
             is_voxel,
             factorizations: BTreeSet::from([factorization]),
         });
-        true
+        RecordOutcome {
+            index,
+            new_entry: true,
+            new_voxel: is_voxel,
+        }
     }
 
     fn populate_boundary_caches(&mut self) {
@@ -809,7 +1031,7 @@ impl CatalogBuilder {
             .par_iter_mut()
             .filter(|entry| entry.boundaries.is_none())
             .for_each(|entry| {
-                entry.boundaries = Some(
+                entry.boundaries = Some(Arc::new(
                     directions
                         .iter()
                         .copied()
@@ -825,7 +1047,7 @@ impl CatalogBuilder {
                             }
                         })
                         .collect(),
-                );
+                ));
             });
     }
 
@@ -835,13 +1057,14 @@ impl CatalogBuilder {
             .map(|entry| SnapshotEntry {
                 shape: entry.shape.clone(),
                 is_voxel: entry.is_voxel,
-                cells: cell_count(&entry.shape),
-                frame: entry.shape.active_directions(),
-                boundaries: entry
-                    .boundaries
-                    .as_ref()
-                    .expect("boundary caches must be populated before a round")
-                    .clone(),
+                cells: entry.cells,
+                frame: entry.frame.clone(),
+                boundaries: Arc::clone(
+                    entry
+                        .boundaries
+                        .as_ref()
+                        .expect("boundary caches must be populated before a round"),
+                ),
             })
             .collect()
     }
@@ -857,8 +1080,9 @@ impl CatalogBuilder {
             .collect();
         let mut order: Vec<_> = (0..self.entries.len()).collect();
         order.sort_unstable_by(|&left, &right| {
-            cell_count(&self.entries[left].shape)
-                .cmp(&cell_count(&self.entries[right].shape))
+            self.entries[left]
+                .cells
+                .cmp(&self.entries[right].cells)
                 .then_with(|| serialized[left].cmp(&serialized[right]))
         });
 
@@ -977,6 +1201,7 @@ mod tests {
         );
 
         for stage in [
+            PolyvoxelEnumerationStage::BoundaryIndexing,
             PolyvoxelEnumerationStage::Shift,
             PolyvoxelEnumerationStage::CylinderMatching,
             PolyvoxelEnumerationStage::Cylinder,
@@ -989,6 +1214,45 @@ mod tests {
         assert!(timings.iter().any(|timing| {
             timing.round == 0 && timing.stage == PolyvoxelEnumerationStage::BoundaryCaching
         }));
+    }
+
+    #[test]
+    fn constructor_jobs_are_processed_only_once() {
+        let mut timings = Vec::new();
+        let catalog = enumerate_polyvoxels_profiled(
+            5,
+            &[0, 1, 2],
+            Some(4),
+            |_| {},
+            |timing| timings.push(timing),
+        );
+
+        let shift_jobs = timings
+            .iter()
+            .filter(|timing| timing.stage == PolyvoxelEnumerationStage::Shift)
+            .map(|timing| timing.jobs)
+            .sum::<usize>();
+        assert_eq!(
+            shift_jobs,
+            catalog
+                .entries()
+                .iter()
+                .filter(|entry| entry.is_voxel)
+                .count(),
+        );
+
+        let paste_jobs = timings
+            .iter()
+            .filter(|timing| timing.stage == PolyvoxelEnumerationStage::Paste)
+            .map(|timing| timing.jobs)
+            .sum::<usize>();
+        let paste_factorizations = catalog
+            .entries()
+            .iter()
+            .flat_map(|entry| &entry.factorizations)
+            .filter(|factorization| matches!(factorization, PolyvoxelFactorization::Paste { .. }))
+            .count();
+        assert_eq!(paste_jobs, paste_factorizations);
     }
 
     #[test]
@@ -1029,28 +1293,42 @@ mod tests {
                 is_voxel: entry.is_voxel,
                 cells: cell_count(&entry.shape),
                 frame: entry.shape.active_directions(),
-                boundaries: directions
-                    .iter()
-                    .copied()
-                    .map(|direction| DirectionalBoundaryCache {
-                        direction,
-                        input: BoundaryNormalForm::new(
-                            boundary(Sign::Input, direction, entry.shape.as_framed_poset()).0,
-                        ),
-                        output: BoundaryNormalForm::new(
-                            boundary(Sign::Output, direction, entry.shape.as_framed_poset()).0,
-                        ),
-                    })
-                    .collect(),
+                boundaries: Arc::new(
+                    directions
+                        .iter()
+                        .copied()
+                        .map(|direction| DirectionalBoundaryCache {
+                            direction,
+                            input: BoundaryNormalForm::new(
+                                boundary(Sign::Input, direction, entry.shape.as_framed_poset()).0,
+                            ),
+                            output: BoundaryNormalForm::new(
+                                boundary(Sign::Output, direction, entry.shape.as_framed_poset()).0,
+                            ),
+                        })
+                        .collect(),
+                ),
             })
             .collect();
+        let all_entries: Vec<_> = (0..entries.len()).collect();
         let voxels: Vec<_> = entries
             .iter()
             .enumerate()
             .filter_map(|(index, entry)| entry.is_voxel.then_some(index))
             .collect();
+        let mut boundary_index = BoundaryIndex::default();
+        boundary_index.add_entries(&entries, &all_entries, &directions);
+        boundary_index.add_voxels(&entries, &voxels, &directions);
 
-        let indexed_cylinders = compatible_cylinder_jobs(&entries, &voxels, &directions, None);
+        let indexed_cylinders = compatible_cylinder_jobs(
+            &entries,
+            &boundary_index,
+            &all_entries,
+            &voxels,
+            &directions,
+            None,
+            &mut HashSet::new(),
+        );
         let mut pairwise_cylinders = Vec::new();
         for &input in &voxels {
             for output in 0..entries.len() {
@@ -1069,7 +1347,14 @@ mod tests {
         }
         assert_eq!(indexed_cylinders, pairwise_cylinders);
 
-        let indexed_pastes = compatible_paste_jobs(&entries, max_cells, None);
+        let indexed_pastes = compatible_paste_jobs(
+            &entries,
+            &boundary_index,
+            &all_entries,
+            max_cells,
+            None,
+            &mut HashSet::new(),
+        );
         let mut pairwise_pastes = Vec::new();
         for (left, left_entry) in entries.iter().enumerate() {
             for (right, right_entry) in entries.iter().enumerate() {
@@ -1097,6 +1382,63 @@ mod tests {
         }
         pairwise_pastes.sort_unstable_by_key(|job| (job.left, job.right, job.direction));
         assert_eq!(indexed_pastes, pairwise_pastes);
+
+        let mut incremental_index = BoundaryIndex::default();
+        let mut processed_cylinders = HashSet::new();
+        let mut processed_pastes = HashSet::new();
+        let mut incremental_cylinders = Vec::new();
+        let mut incremental_pastes = Vec::new();
+        for batch in all_entries.chunks(2) {
+            let new_voxels: Vec<_> = batch
+                .iter()
+                .copied()
+                .filter(|&index| entries[index].is_voxel)
+                .collect();
+            incremental_index.add_entries(&entries, batch, &directions);
+            incremental_index.add_voxels(&entries, &new_voxels, &directions);
+            incremental_cylinders.extend(compatible_cylinder_jobs(
+                &entries,
+                &incremental_index,
+                batch,
+                &new_voxels,
+                &directions,
+                None,
+                &mut processed_cylinders,
+            ));
+            incremental_pastes.extend(compatible_paste_jobs(
+                &entries,
+                &incremental_index,
+                batch,
+                max_cells,
+                None,
+                &mut processed_pastes,
+            ));
+        }
+        incremental_cylinders.sort_unstable();
+        incremental_pastes.sort_unstable_by_key(|job| (job.left, job.right, job.direction));
+        assert_eq!(incremental_cylinders, pairwise_cylinders);
+        assert_eq!(incremental_pastes, pairwise_pastes);
+        assert_eq!(processed_cylinders.len(), pairwise_cylinders.len());
+        assert_eq!(processed_pastes.len(), pairwise_pastes.len());
+
+        let mut promotion_index = BoundaryIndex::default();
+        promotion_index.add_entries(&entries, &all_entries, &directions);
+        let mut promotion_cylinders = Vec::new();
+        let mut processed_promotions = HashSet::new();
+        for batch in voxels.chunks(2) {
+            promotion_index.add_voxels(&entries, batch, &directions);
+            promotion_cylinders.extend(compatible_cylinder_jobs(
+                &entries,
+                &promotion_index,
+                &[],
+                batch,
+                &directions,
+                None,
+                &mut processed_promotions,
+            ));
+        }
+        promotion_cylinders.sort_unstable();
+        assert_eq!(promotion_cylinders, pairwise_cylinders);
     }
 
     fn reconstruct(
