@@ -220,6 +220,12 @@ struct TimingTotal {
     paste_candidates: PasteCandidateCounts,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemoryUsage {
+    resident_kib: usize,
+    peak_kib: usize,
+}
+
 impl TimingTotal {
     fn record(&mut self, timing: PolyvoxelEnumerationTiming) {
         self.jobs += timing.jobs;
@@ -256,6 +262,7 @@ fn main() -> io::Result<()> {
         canonicalisation_name(config.canonical_order),
         pool.current_num_threads(),
     );
+    print_memory_usage("initial memory");
     let started = Instant::now();
     let last_status_print = Mutex::new(started);
     let mut timings = BTreeMap::<PolyvoxelEnumerationStage, TimingTotal>::new();
@@ -268,18 +275,19 @@ fn main() -> io::Result<()> {
             |progress| {
                 if progress.phase == PolyvoxelEnumerationPhase::Complete {
                     println!(
-                        "fixed point complete after {} rounds: {} representatives, {} factorizations ({:.1?})",
+                        "fixed point complete after {} rounds: {} representatives, {} factorizations ({:.1?}); {}",
                         progress.round,
                         progress.representatives,
                         progress.factorizations,
                         started.elapsed(),
+                        memory_usage_description(),
                     );
                 } else if mark_if_interval_elapsed(
                     &last_status_print,
                     PROGRESS_PRINT_INTERVAL,
                 ) {
                     println!(
-                        "round {} {:?}: {}/{} jobs; {} representatives, {} factorizations ({:.1?})",
+                        "round {} {:?}: {}/{} jobs; {} representatives, {} factorizations ({:.1?}); {}",
                         progress.round,
                         progress.phase,
                         progress.completed_jobs,
@@ -287,6 +295,7 @@ fn main() -> io::Result<()> {
                         progress.representatives,
                         progress.factorizations,
                         started.elapsed(),
+                        memory_usage_description(),
                     );
                 }
             },
@@ -299,9 +308,11 @@ fn main() -> io::Result<()> {
             },
         )
     });
+    print_memory_usage("catalogue materialized");
     print_timing_summary(&timings);
 
     write_catalog(&config.output_file, &catalog)?;
+    print_memory_usage("catalogue written");
     let total_factorizations: usize = catalog
         .entries()
         .iter()
@@ -329,6 +340,65 @@ fn mark_printed_now(last_print: &Mutex<Instant>) {
     *last_print.lock().expect("status-print mutex was poisoned") = Instant::now();
 }
 
+fn read_memory_usage() -> Option<MemoryUsage> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    parse_memory_usage(&status)
+}
+
+fn parse_memory_usage(status: &str) -> Option<MemoryUsage> {
+    let mut resident_kib = None;
+    let mut peak_kib = None;
+    for line in status.lines() {
+        if let Some(value) = parse_status_kib(line, "VmRSS:") {
+            resident_kib = Some(value);
+        } else if let Some(value) = parse_status_kib(line, "VmHWM:") {
+            peak_kib = Some(value);
+        }
+    }
+
+    let resident_kib = resident_kib?;
+    Some(MemoryUsage {
+        resident_kib,
+        peak_kib: peak_kib.unwrap_or(resident_kib),
+    })
+}
+
+fn parse_status_kib(line: &str, key: &str) -> Option<usize> {
+    line.strip_prefix(key)?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn memory_usage_description() -> String {
+    read_memory_usage().map_or_else(
+        || "RSS unavailable".to_owned(),
+        |memory| {
+            format!(
+                "RSS {}, peak {}",
+                format_kib(memory.resident_kib),
+                format_kib(memory.peak_kib),
+            )
+        },
+    )
+}
+
+fn format_kib(kib: usize) -> String {
+    const KIB_PER_MIB: usize = 1024;
+    const KIB_PER_GIB: usize = 1024 * KIB_PER_MIB;
+
+    if kib >= KIB_PER_GIB {
+        format!("{:.2} GiB", kib as f64 / KIB_PER_GIB as f64)
+    } else {
+        format!("{:.1} MiB", kib as f64 / KIB_PER_MIB as f64)
+    }
+}
+
+fn print_memory_usage(label: &str) {
+    println!("{label}: {}", memory_usage_description());
+}
+
 fn print_timing(timing: PolyvoxelEnumerationTiming) {
     let counts = format_counts(timing.jobs, timing.results);
     if timing.construction_work.is_zero()
@@ -336,18 +406,22 @@ fn print_timing(timing: PolyvoxelEnumerationTiming) {
         && timing.merge_time.is_zero()
     {
         println!(
-            "timing round {} {:?}: {:.3?} wall, {counts}",
-            timing.round, timing.stage, timing.wall_time,
+            "timing round {} {:?}: {:.3?} wall, {counts}; {}",
+            timing.round,
+            timing.stage,
+            timing.wall_time,
+            memory_usage_description(),
         );
     } else {
         println!(
-            "timing round {} {:?}: {:.3?} wall, {counts}; worker sum: {:.3?} construction + {:.3?} canonicalisation; {:.3?} merge",
+            "timing round {} {:?}: {:.3?} wall, {counts}; worker sum: {:.3?} construction + {:.3?} canonicalisation; {:.3?} merge; {}",
             timing.round,
             timing.stage,
             timing.wall_time,
             timing.construction_work,
             timing.canonicalisation_work,
             timing.merge_time,
+            memory_usage_description(),
         );
     }
     if let Some(counts) = timing.paste_candidates {
@@ -504,5 +578,20 @@ mod tests {
         assert!(parse(&["--threads"]).is_err());
         assert!(parse(&["--canonicalisation", "other"]).is_err());
         assert!(parse(&["--unknown", "1"]).is_err());
+    }
+
+    #[test]
+    fn parses_linux_resident_and_peak_memory() {
+        let status = "Name:\tenumerate\nVmHWM:\t157286400 kB\nVmRSS:\t1048576 kB\n";
+
+        assert_eq!(
+            parse_memory_usage(status),
+            Some(MemoryUsage {
+                resident_kib: 1_048_576,
+                peak_kib: 157_286_400,
+            }),
+        );
+        assert_eq!(format_kib(1_048_576), "1.00 GiB");
+        assert_eq!(format_kib(512 * 1024), "512.0 MiB");
     }
 }

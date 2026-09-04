@@ -6,9 +6,7 @@
 //! operand polyvoxels, whose own factorizations represent all recursive
 //! choices.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -409,7 +407,7 @@ pub fn enumerate_polyvoxels_profiled_with_canonicalisation(
                 let left_boundary = entries[job.left].boundary(job.direction).output();
                 let right_boundary = entries[job.right].boundary(job.direction).input();
                 let isomorphism = left_boundary
-                    .isomorphism_to(right_boundary)
+                    .isomorphism_map_to(right_boundary)
                     .expect("indexed boundary normal forms must agree");
                 let shape = paste(
                     &entries[job.left].shape,
@@ -424,7 +422,7 @@ pub fn enumerate_polyvoxels_profiled_with_canonicalisation(
                         direction: job.direction,
                         left: job.left,
                         right: job.right,
-                        boundary_isomorphism: isomorphism.map,
+                        boundary_isomorphism: isomorphism,
                     },
                 }
             },
@@ -628,8 +626,9 @@ struct ProcessedJobs {
     pastes: HashSet<PasteJob>,
 }
 
-type CylinderBoundaryKey = (u64, u64);
-type SignedBoundaryKey = (usize, u64, usize);
+type StructuralHash = u128;
+type CylinderBoundaryKey = (StructuralHash, StructuralHash);
+type SignedBoundaryKey = (usize, StructuralHash);
 
 #[derive(Default)]
 struct CellIndexedEntries {
@@ -684,11 +683,11 @@ impl BoundaryIndex {
             for &direction in &entry.total_frame {
                 let boundary = entry.boundary(direction);
                 self.paste_inputs
-                    .entry((direction, boundary.input().hash, boundary.input().cells))
+                    .entry((direction, boundary.input().hash))
                     .or_default()
                     .push(entry.cells, index);
                 self.paste_outputs
-                    .entry((direction, boundary.output().hash, boundary.output().cells))
+                    .entry((direction, boundary.output().hash))
                     .or_default()
                     .push(entry.cells, index);
             }
@@ -958,10 +957,9 @@ fn push_paste_jobs_with_new_left(
     for &direction in &left_entry.total_frame {
         let left_boundary = left_entry.boundary(direction).output();
         batch.counts.boundary_index_lookups += 1;
-        if let Some(rights) =
-            boundary_index
-                .paste_inputs
-                .get(&(direction, left_boundary.hash, left_boundary.cells))
+        if let Some(rights) = boundary_index
+            .paste_inputs
+            .get(&(direction, left_boundary.hash))
         {
             batch.counts.nonempty_boundary_buckets += 1;
             batch.counts.indexed_pairs += rights.len;
@@ -998,11 +996,10 @@ fn push_paste_jobs_with_new_right(
     for &direction in &right_entry.total_frame {
         let right_boundary = right_entry.boundary(direction).input();
         batch.counts.boundary_index_lookups += 1;
-        if let Some(lefts) = boundary_index.paste_outputs.get(&(
-            direction,
-            right_boundary.hash,
-            right_boundary.cells,
-        )) {
+        if let Some(lefts) = boundary_index
+            .paste_outputs
+            .get(&(direction, right_boundary.hash))
+        {
             batch.counts.nonempty_boundary_buckets += 1;
             batch.counts.indexed_pairs += lefts.len;
             let max_left_cells = max_cells
@@ -1076,7 +1073,6 @@ struct Candidate {
 
 struct PreparedCandidate {
     shape: Polyvoxel,
-    canonical_shape: Arc<FramedPoset>,
     is_voxel: bool,
     factorization: PolyvoxelFactorization,
 }
@@ -1101,11 +1097,17 @@ fn prepare_candidate(
         return None;
     }
 
+    let length = candidate.shape.length().to_vec();
+    let layering_direction = candidate.shape.layering_direction();
     let (canonical_shape, _) =
         normalise_for_enumeration(candidate.shape.as_framed_poset(), canonical_order);
+    debug_assert_eq!(canonical_shape.canonical_order(), Some(canonical_order));
     Some(PreparedCandidate {
-        shape: candidate.shape,
-        canonical_shape,
+        shape: Polyvoxel::dangerously_from_parts_unchecked(
+            canonical_shape,
+            length,
+            layering_direction,
+        ),
         is_voxel: candidate.is_voxel,
         factorization: candidate.factorization,
     })
@@ -1125,40 +1127,68 @@ fn normalise_for_enumeration(
 
 #[derive(Clone)]
 struct BoundaryNormalForm {
-    hash: u64,
+    hash: StructuralHash,
     cells: usize,
+    normal_to_boundary: Vec<Vec<usize>>,
+    #[cfg(debug_assertions)]
     normal: Arc<FramedPoset>,
-    normal_into_boundary: Embedding,
 }
 
 impl BoundaryNormalForm {
     fn new(shape: Arc<FramedPoset>, canonical_order: CanonicalOrder) -> Self {
         let (normal, normal_into_boundary) = normalise_for_enumeration(&shape, canonical_order);
-        Self::from_normalisation(normal, normal_into_boundary)
+        debug_assert_eq!(normal.canonical_order(), Some(canonical_order));
+        debug_assert!(FramedPoset::equal(&normal, &normal_into_boundary.dom));
+        Self::from_parts(normal, normal_into_boundary.map)
     }
 
-    fn from_normalisation(normal: Arc<FramedPoset>, normal_into_boundary: Embedding) -> Self {
-        debug_assert!(FramedPoset::equal(&normal, &normal_into_boundary.dom));
+    fn identity(normal: Arc<FramedPoset>) -> Self {
+        debug_assert!(normal.canonical_order().is_some());
+        let normal_to_boundary = normal
+            .sizes()
+            .into_iter()
+            .map(|size| (0..size).collect())
+            .collect();
+        Self::from_parts(normal, normal_to_boundary)
+    }
+
+    fn from_parts(normal: Arc<FramedPoset>, normal_to_boundary: Vec<Vec<usize>>) -> Self {
         let cells = cell_count(&normal);
         let hash = structural_hash(&normal);
         Self {
             hash,
             cells,
+            normal_to_boundary,
+            #[cfg(debug_assertions)]
             normal,
-            normal_into_boundary,
         }
     }
 
     fn same_normal_form(&self, other: &Self) -> bool {
-        self.hash == other.hash && FramedPoset::equal(&self.normal, &other.normal)
+        if self.hash != other.hash {
+            return false;
+        }
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            FramedPoset::equal(&self.normal, &other.normal),
+            "distinct canonical boundaries have the same 128-bit structural hash",
+        );
+        true
     }
 
-    fn isomorphism_to(&self, other: &Self) -> Option<Embedding> {
+    fn isomorphism_map_to(&self, other: &Self) -> Option<Vec<Vec<usize>>> {
         self.same_normal_form(other).then(|| {
-            Embedding::compose(
-                &self.normal_into_boundary.inverse_isomorphism(),
-                &other.normal_into_boundary,
-            )
+            self.normal_to_boundary
+                .iter()
+                .zip(&other.normal_to_boundary)
+                .map(|(normal_to_source, normal_to_target)| {
+                    let mut source_to_target = vec![0; normal_to_source.len()];
+                    for (&source, &target) in normal_to_source.iter().zip(normal_to_target) {
+                        source_to_target[source] = target;
+                    }
+                    source_to_target
+                })
+                .collect()
         })
     }
 }
@@ -1199,10 +1229,38 @@ impl SnapshotEntry {
     }
 }
 
-fn structural_hash(shape: &FramedPoset) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    shape.hash(&mut hasher);
-    hasher.finish()
+fn structural_hash(shape: &FramedPoset) -> StructuralHash {
+    fn write_usize(hasher: &mut blake3::Hasher, value: usize) {
+        let value = u64::try_from(value).expect("OFP indices must fit in 64 bits");
+        hasher.update(&value.to_le_bytes());
+    }
+
+    fn write_set(hasher: &mut blake3::Hasher, set: &[usize]) {
+        write_usize(hasher, set.len());
+        for &value in set {
+            write_usize(hasher, value);
+        }
+    }
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"ofposets canonical structural hash v1");
+    let sizes = shape.sizes();
+    write_usize(&mut hasher, sizes.len());
+    for (dim, &size) in sizes.iter().enumerate() {
+        write_usize(&mut hasher, size);
+        for pos in 0..size {
+            write_set(&mut hasher, shape.frame_of(dim, pos));
+            write_set(&mut hasher, shape.faces_of(Sign::Input, dim, pos));
+            write_set(&mut hasher, shape.faces_of(Sign::Output, dim, pos));
+        }
+    }
+
+    let digest = hasher.finalize();
+    StructuralHash::from_le_bytes(
+        digest.as_bytes()[..std::mem::size_of::<StructuralHash>()]
+            .try_into()
+            .expect("a BLAKE3 digest contains 128 bits"),
+    )
 }
 
 fn cell_count(shape: &FramedPoset) -> usize {
@@ -1211,8 +1269,6 @@ fn cell_count(shape: &FramedPoset) -> usize {
 
 struct WorkingEntry {
     shape: Polyvoxel,
-    canonical_shape: Arc<FramedPoset>,
-    canonical_into_shape: Option<Embedding>,
     cells: usize,
     total_frame: IntSet,
     boundaries: Option<Arc<Vec<DirectionalBoundaryCache>>>,
@@ -1271,11 +1327,10 @@ impl CatalogBuilder {
     fn record(&mut self, candidate: PreparedCandidate) -> RecordOutcome {
         let PreparedCandidate {
             shape,
-            canonical_shape,
             is_voxel,
             factorization,
         } = candidate;
-        if let Some(&index) = self.indices.get(&canonical_shape) {
+        if let Some(&index) = self.indices.get(shape.as_framed_poset()) {
             let entry = &mut self.entries[index];
             let became_voxel = is_voxel && !entry.is_voxel;
             entry.is_voxel |= is_voxel;
@@ -1289,22 +1344,14 @@ impl CatalogBuilder {
 
         debug_assert!(shape.well_formed());
         debug_assert!(is_volumetric(shape.as_framed_poset()));
-        let shape = Polyvoxel::dangerously_from_parts_unchecked(
-            Arc::clone(&canonical_shape),
-            shape.length().to_vec(),
-            shape.layering_direction(),
-        );
-        // Deferred allocation and canonical-boundary alternatives are recorded in
-        // src/enumeration/performance-notes.md.
-        let canonical_into_shape = Embedding::id(Arc::clone(&canonical_shape));
+        debug_assert_eq!(shape.canonical_order(), Some(self.canonical_order));
         let cells = cell_count(&shape);
         let total_frame = shape.total_frame();
         let index = self.entries.len();
-        self.indices.insert(Arc::clone(&canonical_shape), index);
+        self.indices
+            .insert(Arc::clone(shape.as_framed_poset()), index);
         self.entries.push(WorkingEntry {
             shape,
-            canonical_shape,
-            canonical_into_shape: Some(canonical_into_shape),
             cells,
             total_frame,
             boundaries: None,
@@ -1329,10 +1376,6 @@ impl CatalogBuilder {
                 if cylinder_enabled {
                     intset::insert(&mut directions, 0);
                 }
-                let canonical_into_shape = entry
-                    .canonical_into_shape
-                    .take()
-                    .expect("an uncached entry must retain its normalization embedding");
                 entry.boundaries = Some(Arc::new(
                     directions
                         .iter()
@@ -1340,10 +1383,9 @@ impl CatalogBuilder {
                         .map(|direction| {
                             if entry.total_frame.binary_search(&direction).is_err() {
                                 debug_assert_eq!(direction, 0);
-                                let boundary = BoundaryNormalForm::from_normalisation(
-                                    Arc::clone(&entry.canonical_shape),
-                                    canonical_into_shape.clone(),
-                                );
+                                let boundary = BoundaryNormalForm::identity(Arc::clone(
+                                    entry.shape.as_framed_poset(),
+                                ));
                                 return DirectionalBoundaryCache {
                                     direction,
                                     input: boundary.clone(),
@@ -1389,7 +1431,7 @@ impl CatalogBuilder {
             .entries
             .iter()
             .map(|entry| {
-                serde_json::to_string(entry.canonical_shape.as_ref())
+                serde_json::to_string(entry.shape.as_framed_poset().as_ref())
                     .expect("serializing a framed poset to a string cannot fail")
             })
             .collect();
@@ -1471,6 +1513,27 @@ mod tests {
         );
         assert!(graph.entries().iter().all(|entry| entry.shape.is_normal()));
         assert_eq!(traversal.len(), graph.len());
+    }
+
+    #[test]
+    fn boundary_cache_keeps_only_a_canonical_shape_and_recovers_the_map() {
+        let source = Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![1]]],
+        ));
+        let target = Arc::new(FramedPoset::from_faces(
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+            vec![vec![vec![], vec![]], vec![vec![1]]],
+            vec![vec![vec![], vec![]], vec![vec![0]]],
+        ));
+        let source_cache = BoundaryNormalForm::new(Arc::clone(&source), CanonicalOrder::Graph);
+        let target_cache = BoundaryNormalForm::new(Arc::clone(&target), CanonicalOrder::Graph);
+
+        let map = source_cache
+            .isomorphism_map_to(&target_cache)
+            .expect("the two presentations of the arrow must have the same normal form");
+        assert!(Embedding::from_map(source, target, map).is_isomorphism());
     }
 
     #[test]

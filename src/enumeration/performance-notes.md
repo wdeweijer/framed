@@ -28,16 +28,26 @@ It is concentrated in paste merging, which is 6.3 seconds slower. This is
 large enough to investigate, although repeated runs are needed for precise
 measurements.
 
-## Why an identity embedding is allocated
+## Canonical-only retained shapes
 
-For a boundary `B`, `BoundaryNormalForm` stores both its canonical form and an
+Enumeration now retains only canonical OFPs. A constructed candidate may have
+an incidental cell order briefly, but `prepare_candidate` replaces it with its
+selected canonical representative before the parallel result batch or the
+catalogue stores it.
+
+For a boundary `B`, release builds of `BoundaryNormalForm` store a 128-bit
+BLAKE3 digest of its canonical form and the forward relabelling table of the
 isomorphism
 
 ```text
 eta_B: N(B) -> B.
 ```
 
-For two matching boundaries, their concrete isomorphism is computed as
+The digest is the boundary-class index, so release builds retain neither the
+canonical boundary nor the embedding, which would keep the non-canonical `B`
+alive as its codomain. Debug builds retain the canonical boundary only to
+assert that a matching digest is not a collision. For two matching boundaries,
+the concrete map is computed directly from the two relabelling tables as
 
 ```text
 B_left --eta_left^-1--> N(B) --eta_right--> B_right.
@@ -55,22 +65,17 @@ canonicaliser supplied the generally nontrivial map `N(X) -> X`. Now the
 catalogue retains `N(X)` itself, so the corresponding map is the identity
 `N(X) -> N(X)`. The old cache plumbing still stores this map explicitly.
 
-At present, `CatalogBuilder::record` constructs a complete identity embedding
-for every new representative. This allocates both `map` and `inv` tables. The
-embedding is only used by boundary caching when direction 0 is enabled for
-cylinder matching but is absent from that representative's total frame.
+For an inactive direction the canonical boundary is the canonical parent OFP,
+and its relabelling table is represented by an explicitly generated identity
+map. No second OFP or inverse table is retained.
 
 ## Deferred approaches
 
-### Allocate the identity lazily
+### Represent the identity implicitly
 
-Remove `canonical_into_shape` from `WorkingEntry`. In the inactive-direction
-branch of `populate_boundary_caches`, construct the identity there instead.
-This moves the work into the parallel boundary-caching phase and avoids it for
-representatives whose cached directions are all active.
-
-An implicit identity variant inside `BoundaryNormalForm` could avoid even that
-allocation, but would complicate composition slightly.
+An implicit identity variant inside `BoundaryNormalForm` could avoid the
+forward-map allocation for inactive directions, at the cost of another cache
+representation branch.
 
 ### Construct traversal-canonical boundaries directly
 
