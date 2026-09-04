@@ -6,7 +6,7 @@ use rust_igraph::{Graph, canonical_permutation, get_isomorphisms_vf2, isomorphic
 
 use crate::embedding::{Embedding, NO_PREIMAGE};
 use crate::intset::{self, IntSet};
-use crate::poset::{FramedPoset, Sign};
+use crate::poset::{CanonicalOrder, FramedPoset, Sign};
 
 struct ColoredHasseGraph {
     graph: Graph,
@@ -115,7 +115,7 @@ fn recompute_normalisation(shape: &FramedPoset) -> (FramedPoset, Vec<Vec<usize>>
     }
 
     let mut normalized = FramedPoset::from_faces(frames, faces_in, faces_out);
-    normalized.normal = true;
+    normalized.canonical_order = Some(CanonicalOrder::Graph);
     debug_assert!(vf2_isomorphic(shape, &normalized));
     (normalized, new_to_old)
 }

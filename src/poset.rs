@@ -26,6 +26,18 @@ pub struct Element {
     pub pos: usize,
 }
 
+/// The canonical cell ordering certified for a framed poset.
+///
+/// This is runtime metadata only: it does not participate in structural
+/// equality, hashing, or serialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanonicalOrder {
+    /// The graph-isomorphism canonical ordering.
+    Graph,
+    /// The intrinsic polyvoxel traversal ordering.
+    Traversal,
+}
+
 impl Sign {
     pub(crate) fn opposite(self) -> Self {
         match self {
@@ -41,7 +53,7 @@ impl Sign {
 /// level `d`, `frames[d][p]` is a finite set of directions of cardinality `d`.
 #[derive(Debug, Clone)]
 pub struct FramedPoset {
-    pub(crate) normal: bool,
+    pub(crate) canonical_order: Option<CanonicalOrder>,
     pub(crate) dim: isize,
     pub(crate) frames: Vec<Vec<IntSet>>,
     pub(crate) faces_in: Vec<Vec<IntSet>>,
@@ -155,7 +167,7 @@ impl<'de> Deserialize<'de> for FramedPoset {
         }
 
         let poset = Self {
-            normal: false,
+            canonical_order: None,
             dim: levels as isize - 1,
             frames: data.frames,
             faces_in: data.faces_in,
@@ -244,7 +256,7 @@ impl FramedPoset {
     ) -> Self {
         let dim = frames.len() as isize - 1;
         let poset = Self {
-            normal: false,
+            canonical_order: None,
             dim,
             frames,
             faces_in,
@@ -298,9 +310,21 @@ impl FramedPoset {
         self.dim
     }
 
-    /// Whether this framed poset is known to be in canonical normal form.
+    /// The canonical cell ordering currently certified for this framed poset.
+    pub fn canonical_order(&self) -> Option<CanonicalOrder> {
+        self.canonical_order
+    }
+
+    /// Whether this framed poset is known to be in graph-canonical order.
+    ///
+    /// This retains the meaning of the original graph-normal-form marker.
     pub fn is_normal(&self) -> bool {
-        self.normal
+        self.canonical_order == Some(CanonicalOrder::Graph)
+    }
+
+    /// Whether this framed poset is known to be in traversal-canonical order.
+    pub fn is_traversal_normal(&self) -> bool {
+        self.canonical_order == Some(CanonicalOrder::Traversal)
     }
 
     /// Number of cells at each frame cardinality.
@@ -620,7 +644,7 @@ pub fn shift(shape: &FramedPoset) -> FramedPoset {
             .checked_add(1)
             .expect("cannot shift direction usize::MAX");
     }
-    shifted.normal = false;
+    shifted.canonical_order = None;
     debug_assert!(shifted.well_formed());
     shifted
 }
@@ -1079,10 +1103,18 @@ mod tests {
     fn equality_and_hash_ignore_the_normal_form_marker() {
         let shape = tight_arrow();
         let mut marked_normal = shape.as_ref().clone();
-        marked_normal.normal = true;
+        marked_normal.canonical_order = Some(CanonicalOrder::Graph);
+
+        let mut marked_traversal_normal = shape.as_ref().clone();
+        marked_traversal_normal.canonical_order = Some(CanonicalOrder::Traversal);
 
         assert_eq!(shape.as_ref(), &marked_normal);
         assert_eq!(structural_hash(&shape), structural_hash(&marked_normal));
+        assert_eq!(shape.as_ref(), &marked_traversal_normal);
+        assert_eq!(
+            structural_hash(&shape),
+            structural_hash(&marked_traversal_normal)
+        );
     }
 
     #[test]
@@ -1112,6 +1144,8 @@ mod tests {
         assert!(!json.contains("\"frames\""));
         assert!(!json.contains("cofaces"));
         assert!(!json.contains("normal"));
+        assert!(!json.contains("canonical_order"));
+        assert_eq!(restored.canonical_order(), None);
         assert!(!restored.is_normal());
     }
 
@@ -1215,7 +1249,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_signed_face_overlap() {
         let poset = FramedPoset {
-            normal: false,
+            canonical_order: None,
             dim: 1,
             frames: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![0]]],
@@ -1230,7 +1264,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_positive_cell_without_faces() {
         let poset = FramedPoset {
-            normal: false,
+            canonical_order: None,
             dim: 1,
             frames: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![]]],
@@ -1245,7 +1279,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_non_closed_frame_map() {
         let poset = FramedPoset {
-            normal: false,
+            canonical_order: None,
             dim: 2,
             frames: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
             faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0]]],
@@ -1260,7 +1294,7 @@ mod tests {
     #[test]
     fn well_formed_accepts_one_sided_faces_over_every_frame_face() {
         let poset = FramedPoset {
-            normal: false,
+            canonical_order: None,
             dim: 2,
             frames: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
             faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0, 1]]],
@@ -1275,7 +1309,7 @@ mod tests {
     #[test]
     fn well_formed_rejects_duplicate_adjacency() {
         let poset = FramedPoset {
-            normal: false,
+            canonical_order: None,
             dim: 1,
             frames: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![0, 0]]],
@@ -1303,7 +1337,7 @@ mod tests {
     #[test]
     fn boundary_outside_the_total_frame_is_the_shared_identity() {
         let mut arrow = (*tight_arrow()).clone();
-        arrow.normal = true;
+        arrow.canonical_order = Some(CanonicalOrder::Graph);
         let arrow = Arc::new(arrow);
 
         for sign in [Sign::Input, Sign::Output] {

@@ -15,7 +15,9 @@ use std::sync::Arc;
 use crate::embedding::Embedding;
 use crate::intset;
 use crate::polyvoxel::Polyvoxel;
-use crate::poset::{Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure};
+use crate::poset::{
+    CanonicalOrder, Element, FramedPoset, FramedPosetSubset, Sign, boundary, closure,
+};
 
 /// A failed invariant of the proposed polyvoxel traversal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,8 +100,9 @@ pub fn traversal_order(polyvoxel: &Polyvoxel) -> Result<Vec<Element>, TraversalE
 ///
 /// Cells at each frame cardinality retain their relative traversal order. The
 /// returned embedding is an isomorphism from the relabelled shape to the
-/// original shape. The relabelled OFP is deliberately not marked as the
-/// graph-isomorphism normal form used by [`crate::isomorphism::normalize`].
+/// original shape. The relabelled OFP is marked as traversal-canonical, which
+/// is distinct from the graph-canonical form used by
+/// [`crate::isomorphism::normalize`].
 pub fn traversal_normalisation(
     polyvoxel: &Polyvoxel,
 ) -> Result<(Arc<FramedPoset>, Embedding), TraversalError> {
@@ -116,6 +119,10 @@ pub fn traversal_normalisation(
 pub fn traversal_normalisation_of_shape(
     shape: &Arc<FramedPoset>,
 ) -> Result<(Arc<FramedPoset>, Embedding), TraversalError> {
+    if shape.is_traversal_normal() {
+        return Ok((Arc::clone(shape), Embedding::id(Arc::clone(shape))));
+    }
+
     let order = traverse_shape(shape)?;
     let sizes = shape.sizes();
 
@@ -175,7 +182,9 @@ pub fn traversal_normalisation_of_shape(
         );
     }
 
-    let normal = Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out));
+    let mut normal = FramedPoset::from_faces(frames, faces_in, faces_out);
+    normal.canonical_order = Some(CanonicalOrder::Traversal);
+    let normal = Arc::new(normal);
     let into_original = Embedding::from_map(Arc::clone(&normal), Arc::clone(shape), new_to_old);
     debug_assert!(into_original.is_isomorphism());
     Ok((normal, into_original))
@@ -437,6 +446,8 @@ mod tests {
 
     fn assert_traversal_normalises(polyvoxel: &Polyvoxel) -> Arc<FramedPoset> {
         let (normal, into_original) = traversal_normalisation(polyvoxel).unwrap();
+        assert!(normal.is_traversal_normal());
+        assert_eq!(normal.canonical_order(), Some(CanonicalOrder::Traversal));
         assert!(!normal.is_normal());
         assert!(into_original.is_isomorphism());
         assert!(FramedPoset::equal(&normal, &into_original.dom));
@@ -445,6 +456,16 @@ mod tests {
             &into_original.cod,
         ));
         normal
+    }
+
+    #[test]
+    fn traversal_normalisation_reuses_a_certified_shape() {
+        let normal = assert_traversal_normalises(&square());
+        let (normal_again, into_normal) = traversal_normalisation_of_shape(&normal).unwrap();
+
+        assert!(Arc::ptr_eq(&normal_again, &normal));
+        assert!(into_normal.is_isomorphism());
+        assert_eq!(into_normal.map, Embedding::id(Arc::clone(&normal)).map);
     }
 
     #[test]

@@ -19,7 +19,8 @@ use crate::embedding::Embedding;
 use crate::intset::{self, IntSet};
 use crate::isomorphism::normalisation as graph_normalisation;
 use crate::polyvoxel::{Polyvoxel, cylinder, paste, point, shift};
-use crate::poset::{FramedPoset, Sign, boundary};
+use crate::poset::{CanonicalOrder, FramedPoset, Sign, boundary};
+use crate::traversal::traversal_normalisation_of_shape;
 use crate::volumetric::is_volumetric;
 
 #[cfg(test)]
@@ -247,6 +248,28 @@ pub fn enumerate_polyvoxels_profiled(
     max_cells: usize,
     allowed_directions: &[usize],
     length_bound: Option<usize>,
+    report: impl FnMut(PolyvoxelEnumerationProgress),
+    report_timing: impl FnMut(PolyvoxelEnumerationTiming),
+) -> PolyvoxelCatalog {
+    enumerate_polyvoxels_profiled_with_canonicalisation(
+        max_cells,
+        allowed_directions,
+        length_bound,
+        CanonicalOrder::Traversal,
+        report,
+        report_timing,
+    )
+}
+
+/// Enumerate polyvoxels with an explicit canonical cell ordering.
+///
+/// The selected canonical representatives are used directly for structural
+/// equality, hashing, subsequent constructions, and catalogue serialization.
+pub fn enumerate_polyvoxels_profiled_with_canonicalisation(
+    max_cells: usize,
+    allowed_directions: &[usize],
+    length_bound: Option<usize>,
+    canonical_order: CanonicalOrder,
     mut report: impl FnMut(PolyvoxelEnumerationProgress),
     mut report_timing: impl FnMut(PolyvoxelEnumerationTiming),
 ) -> PolyvoxelCatalog {
@@ -255,7 +278,12 @@ pub fn enumerate_polyvoxels_profiled(
         "allowed directions must be sorted and deduplicated",
     );
 
-    let mut builder = CatalogBuilder::new(max_cells, allowed_directions.to_vec(), length_bound);
+    let mut builder = CatalogBuilder::new(
+        max_cells,
+        allowed_directions.to_vec(),
+        length_bound,
+        canonical_order,
+    );
     let initial = prepare_candidate(
         Candidate {
             shape: point(),
@@ -265,6 +293,7 @@ pub fn enumerate_polyvoxels_profiled(
         max_cells,
         allowed_directions,
         length_bound,
+        canonical_order,
     )
     .expect("the point must fit every polyvoxel catalogue");
     let initial = builder.record(initial);
@@ -506,6 +535,7 @@ where
     let max_cells = builder.max_cells;
     let allowed_directions = builder.allowed_directions.clone();
     let length_bound = builder.length_bound;
+    let canonical_order = builder.canonical_order;
     let mut new_entries = BTreeSet::new();
     let mut new_voxels = BTreeSet::new();
     let mut construction_work = Duration::ZERO;
@@ -520,8 +550,13 @@ where
                 let candidate = construct(job);
                 let construction_time = construction_started.elapsed();
                 let canonicalisation_started = Instant::now();
-                let candidate =
-                    prepare_candidate(candidate, max_cells, &allowed_directions, length_bound);
+                let candidate = prepare_candidate(
+                    candidate,
+                    max_cells,
+                    &allowed_directions,
+                    length_bound,
+                    canonical_order,
+                );
                 let canonicalisation_time = canonicalisation_started.elapsed();
                 (candidate, construction_time, canonicalisation_time)
             })
@@ -1042,7 +1077,6 @@ struct Candidate {
 struct PreparedCandidate {
     shape: Polyvoxel,
     canonical_shape: Arc<FramedPoset>,
-    canonical_into_shape: Embedding,
     is_voxel: bool,
     factorization: PolyvoxelFactorization,
 }
@@ -1052,6 +1086,7 @@ fn prepare_candidate(
     max_cells: usize,
     allowed_directions: &[usize],
     length_bound: Option<usize>,
+    canonical_order: CanonicalOrder,
 ) -> Option<PreparedCandidate> {
     if cell_count(&candidate.shape) > max_cells
         || !intset::is_subset(&candidate.shape.total_frame(), allowed_directions)
@@ -1066,20 +1101,26 @@ fn prepare_candidate(
         return None;
     }
 
-    let (canonical_shape, canonical_into_shape) =
-        normalise_for_enumeration(candidate.shape.as_framed_poset());
+    let (canonical_shape, _) =
+        normalise_for_enumeration(candidate.shape.as_framed_poset(), canonical_order);
     Some(PreparedCandidate {
         shape: candidate.shape,
         canonical_shape,
-        canonical_into_shape,
         is_voxel: candidate.is_voxel,
         factorization: candidate.factorization,
     })
 }
 
 /// The single switch point for the canonicalisation used by enumeration.
-fn normalise_for_enumeration(shape: &Arc<FramedPoset>) -> (Arc<FramedPoset>, Embedding) {
-    graph_normalisation(shape)
+fn normalise_for_enumeration(
+    shape: &Arc<FramedPoset>,
+    canonical_order: CanonicalOrder,
+) -> (Arc<FramedPoset>, Embedding) {
+    match canonical_order {
+        CanonicalOrder::Graph => graph_normalisation(shape),
+        CanonicalOrder::Traversal => traversal_normalisation_of_shape(shape)
+            .expect("enumerated polyvoxels must admit the intrinsic traversal"),
+    }
 }
 
 #[derive(Clone)]
@@ -1091,8 +1132,8 @@ struct BoundaryNormalForm {
 }
 
 impl BoundaryNormalForm {
-    fn new(shape: Arc<FramedPoset>) -> Self {
-        let (normal, normal_into_boundary) = normalise_for_enumeration(&shape);
+    fn new(shape: Arc<FramedPoset>, canonical_order: CanonicalOrder) -> Self {
+        let (normal, normal_into_boundary) = normalise_for_enumeration(&shape, canonical_order);
         Self::from_normalisation(normal, normal_into_boundary)
     }
 
@@ -1189,17 +1230,24 @@ struct CatalogBuilder {
     max_cells: usize,
     allowed_directions: IntSet,
     length_bound: Option<usize>,
+    canonical_order: CanonicalOrder,
     round: usize,
     entries: Vec<WorkingEntry>,
     indices: HashMap<Arc<FramedPoset>, usize>,
 }
 
 impl CatalogBuilder {
-    fn new(max_cells: usize, allowed_directions: IntSet, length_bound: Option<usize>) -> Self {
+    fn new(
+        max_cells: usize,
+        allowed_directions: IntSet,
+        length_bound: Option<usize>,
+        canonical_order: CanonicalOrder,
+    ) -> Self {
         Self {
             max_cells,
             allowed_directions,
             length_bound,
+            canonical_order,
             round: 1,
             entries: Vec::new(),
             indices: HashMap::new(),
@@ -1224,7 +1272,6 @@ impl CatalogBuilder {
         let PreparedCandidate {
             shape,
             canonical_shape,
-            canonical_into_shape,
             is_voxel,
             factorization,
         } = candidate;
@@ -1242,6 +1289,14 @@ impl CatalogBuilder {
 
         debug_assert!(shape.well_formed());
         debug_assert!(is_volumetric(shape.as_framed_poset()));
+        let shape = Polyvoxel::dangerously_from_parts_unchecked(
+            Arc::clone(&canonical_shape),
+            shape.length().to_vec(),
+            shape.layering_direction(),
+        );
+        // Deferred allocation and canonical-boundary alternatives are recorded in
+        // src/enumeration/performance-notes.md.
+        let canonical_into_shape = Embedding::id(Arc::clone(&canonical_shape));
         let cells = cell_count(&shape);
         let total_frame = shape.total_frame();
         let index = self.entries.len();
@@ -1265,6 +1320,7 @@ impl CatalogBuilder {
 
     fn populate_boundary_caches(&mut self) {
         let cylinder_enabled = self.allowed_directions.binary_search(&0).is_ok();
+        let canonical_order = self.canonical_order;
         self.entries
             .par_iter_mut()
             .filter(|entry| entry.boundaries.is_none())
@@ -1301,8 +1357,8 @@ impl CatalogBuilder {
                                 boundary(Sign::Output, direction, entry.shape.as_framed_poset()).0;
                             DirectionalBoundaryCache {
                                 direction,
-                                input: BoundaryNormalForm::new(input),
-                                output: BoundaryNormalForm::new(output),
+                                input: BoundaryNormalForm::new(input, canonical_order),
+                                output: BoundaryNormalForm::new(output, canonical_order),
                             }
                         })
                         .collect(),
@@ -1378,6 +1434,44 @@ impl CatalogBuilder {
 mod tests {
     use super::*;
     use crate::poset::{polyvoxel_layering_direction, polyvoxel_length};
+
+    #[test]
+    fn enumeration_canonicalisation_methods_mark_their_results() {
+        let shape = point();
+        let (traversal, traversal_into_shape) =
+            normalise_for_enumeration(shape.as_framed_poset(), CanonicalOrder::Traversal);
+        let (graph, graph_into_shape) =
+            normalise_for_enumeration(shape.as_framed_poset(), CanonicalOrder::Graph);
+
+        assert!(traversal.is_traversal_normal());
+        assert!(!traversal.is_normal());
+        assert!(traversal_into_shape.is_isomorphism());
+        assert!(graph.is_normal());
+        assert!(!graph.is_traversal_normal());
+        assert!(graph_into_shape.is_isomorphism());
+    }
+
+    #[test]
+    fn catalogues_retain_the_selected_canonical_representatives() {
+        let traversal = enumerate_polyvoxels(3, &[0, 1, 2]);
+        let graph = enumerate_polyvoxels_profiled_with_canonicalisation(
+            3,
+            &[0, 1, 2],
+            None,
+            CanonicalOrder::Graph,
+            |_| {},
+            |_| {},
+        );
+
+        assert!(
+            traversal
+                .entries()
+                .iter()
+                .all(|entry| entry.shape.is_traversal_normal())
+        );
+        assert!(graph.entries().iter().all(|entry| entry.shape.is_normal()));
+        assert_eq!(traversal.len(), graph.len());
+    }
 
     #[test]
     fn directions_zero_through_two_give_three_tight_arrows() {
@@ -1584,9 +1678,11 @@ mod tests {
                             direction,
                             input: BoundaryNormalForm::new(
                                 boundary(Sign::Input, direction, entry.shape.as_framed_poset()).0,
+                                CanonicalOrder::Traversal,
                             ),
                             output: BoundaryNormalForm::new(
                                 boundary(Sign::Output, direction, entry.shape.as_framed_poset()).0,
+                                CanonicalOrder::Traversal,
                             ),
                         })
                         .collect(),

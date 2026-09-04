@@ -16,8 +16,9 @@ use crate::pushout::{Pushout, paste_along_boundary};
 /// The wrapped shape is immutable, and the field is private so that public code
 /// can obtain a `Polyvoxel` only from [`point`], [`shift`], [`cylinder`],
 /// [`paste`], certified transport along [`Polyvoxel::from_isomorphism`], or by
-/// cloning an existing value. These operations form the trusted kernel for
-/// polyvoxelhood.
+/// explicitly bypassing the invariant through
+/// [`Polyvoxel::dangerously_from_parts_unchecked`]. Except for that escape
+/// hatch, these operations form the trusted kernel for polyvoxelhood.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Polyvoxel {
     shape: Arc<FramedPoset>,
@@ -91,6 +92,25 @@ impl Polyvoxel {
             shape,
             length: known_polyvoxel.length.clone(),
             layering_direction: known_polyvoxel.layering_direction,
+        }
+    }
+
+    /// Construct a purported polyvoxel without checking any invariant.
+    ///
+    /// This is an explicit escape hatch from the trusted polyvoxel
+    /// constructors. The caller is responsible for proving that `shape` is a
+    /// polyvoxel and that `length` and `layering_direction` are its intrinsic
+    /// values. Incorrect arguments can invalidate every assumption made by
+    /// functions accepting a [`Polyvoxel`].
+    pub fn dangerously_from_parts_unchecked(
+        shape: Arc<FramedPoset>,
+        length: Vec<usize>,
+        layering_direction: Option<usize>,
+    ) -> Self {
+        Self {
+            shape,
+            length,
+            layering_direction,
         }
     }
 }
@@ -319,6 +339,17 @@ mod tests {
         let embedding = Embedding::empty(Arc::clone(known_polyvoxel.as_framed_poset()));
 
         let _ = Polyvoxel::from_isomorphism(shape, &embedding, &known_polyvoxel);
+    }
+
+    #[test]
+    fn dangerous_constructor_trusts_raw_parts() {
+        let shape = Arc::new(FramedPoset::empty());
+        let claimed =
+            Polyvoxel::dangerously_from_parts_unchecked(Arc::clone(&shape), vec![7, 8], Some(1));
+
+        assert!(Arc::ptr_eq(claimed.as_framed_poset(), &shape));
+        assert_eq!(claimed.length(), [7, 8]);
+        assert_eq!(claimed.layering_direction(), Some(1));
     }
 
     fn square_for_test() -> Polyvoxel {

@@ -7,15 +7,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use ofposets::FramedPoset;
 use ofposets::enumeration::{
     PasteCandidateCounts, PolyvoxelCatalog, PolyvoxelEnumerationPhase, PolyvoxelEnumerationStage,
-    PolyvoxelEnumerationTiming, PolyvoxelFactorization, enumerate_polyvoxels_profiled,
+    PolyvoxelEnumerationTiming, PolyvoxelFactorization,
+    enumerate_polyvoxels_profiled_with_canonicalisation,
 };
+use ofposets::{CanonicalOrder, FramedPoset};
 use serde::Serialize;
 
 const DEFAULT_MAX_CELLS: usize = 27;
 const DEFAULT_MAX_DIRECTION: usize = 2;
+const DEFAULT_CANONICAL_ORDER: CanonicalOrder = CanonicalOrder::Traversal;
 const PROGRESS_PRINT_INTERVAL: Duration = Duration::from_secs(5);
 const TIMING_PRINT_THRESHOLD: Duration = Duration::from_secs(1);
 
@@ -26,6 +28,7 @@ struct Config {
     allowed_directions: Vec<usize>,
     length_bound: Option<usize>,
     thread_count: Option<usize>,
+    canonical_order: CanonicalOrder,
     output_file: PathBuf,
 }
 
@@ -46,6 +49,7 @@ impl Config {
         let mut max_direction = DEFAULT_MAX_DIRECTION;
         let mut length_bound = None;
         let mut thread_count = None;
+        let mut canonical_order = DEFAULT_CANONICAL_ORDER;
         let mut output_file = None;
         let mut args = args.into_iter();
 
@@ -71,6 +75,9 @@ impl Config {
                 "--threads" => {
                     let count = parse_usize_option(&mut args, &program, option)?;
                     thread_count = (count != 0).then_some(count);
+                }
+                "--canonicalisation" => {
+                    canonical_order = parse_canonicalisation_option(&mut args, &program, option)?;
                 }
                 "--output" => {
                     output_file = Some(PathBuf::from(next_option_value(
@@ -111,6 +118,7 @@ impl Config {
             allowed_directions,
             length_bound,
             thread_count,
+            canonical_order,
             output_file,
         }))
     }
@@ -125,6 +133,8 @@ fn usage(program: &OsString) -> String {
            --max-direction <N>   Allow directions 0 through N [default: {DEFAULT_MAX_DIRECTION}]\n\
            --length-bound <N>    Exclusive directional-length bound; 0 is unbounded [default: 0]\n\
            --threads <N>         Rayon worker threads; 0 uses all available threads [default: 0]\n\
+           --canonicalisation <METHOD>\n\
+                                 Canonical ordering: traversal or graph [default: traversal]\n\
            --output <PATH>       Output JSONL file [default: derived from the bounds]\n\
            -h, --help            Print help",
         Path::new(program)
@@ -153,6 +163,29 @@ fn parse_usize_option(
         .to_str()
         .and_then(|value| value.parse().ok())
         .ok_or_else(|| argument_error(program, &format!("{option} must be a nonnegative integer")))
+}
+
+fn parse_canonicalisation_option(
+    args: &mut impl Iterator<Item = OsString>,
+    program: &OsString,
+    option: &str,
+) -> io::Result<CanonicalOrder> {
+    let value = next_option_value(args, program, option)?;
+    match value.to_str() {
+        Some("traversal") => Ok(CanonicalOrder::Traversal),
+        Some("graph") => Ok(CanonicalOrder::Graph),
+        _ => Err(argument_error(
+            program,
+            &format!("{option} must be either traversal or graph"),
+        )),
+    }
+}
+
+fn canonicalisation_name(canonical_order: CanonicalOrder) -> &'static str {
+    match canonical_order {
+        CanonicalOrder::Graph => "graph",
+        CanonicalOrder::Traversal => "traversal",
+    }
 }
 
 fn argument_error(program: &OsString, message: &str) -> io::Error {
@@ -216,20 +249,22 @@ fn main() -> io::Result<()> {
     }
     let pool = pool_builder.build().map_err(io::Error::other)?;
     println!(
-        "enumerating polyvoxels with at most {} cells, total-frame directions from 0 through {}, {}, using {} threads",
+        "enumerating polyvoxels with at most {} cells, total-frame directions from 0 through {}, {}, using {} canonicalisation and {} threads",
         config.max_cells,
         config.max_direction,
         length_description,
+        canonicalisation_name(config.canonical_order),
         pool.current_num_threads(),
     );
     let started = Instant::now();
     let last_status_print = Mutex::new(started);
     let mut timings = BTreeMap::<PolyvoxelEnumerationStage, TimingTotal>::new();
     let catalog = pool.install(|| {
-        enumerate_polyvoxels_profiled(
+        enumerate_polyvoxels_profiled_with_canonicalisation(
             config.max_cells,
             &config.allowed_directions,
             config.length_bound,
+            config.canonical_order,
             |progress| {
                 if progress.phase == PolyvoxelEnumerationPhase::Complete {
                     println!(
@@ -419,6 +454,7 @@ mod tests {
         assert_eq!(config.allowed_directions, vec![0, 1, 2]);
         assert_eq!(config.length_bound, None);
         assert_eq!(config.thread_count, None);
+        assert_eq!(config.canonical_order, CanonicalOrder::Traversal);
         assert!(config.output_file.ends_with(
             "visualizations/polyvoxels_up_to_27_cells_directions_0_to_2_unbounded_length.jsonl"
         ));
@@ -429,6 +465,8 @@ mod tests {
         let config = parse(&[
             "--threads",
             "6",
+            "--canonicalisation",
+            "graph",
             "--output",
             "catalog.jsonl",
             "--length-bound",
@@ -446,6 +484,7 @@ mod tests {
         assert_eq!(config.allowed_directions, vec![0, 1, 2, 3]);
         assert_eq!(config.length_bound, Some(4));
         assert_eq!(config.thread_count, Some(6));
+        assert_eq!(config.canonical_order, CanonicalOrder::Graph);
         assert_eq!(config.output_file, Path::new("catalog.jsonl"));
     }
 
@@ -463,6 +502,7 @@ mod tests {
     fn invalid_options_are_rejected() {
         assert!(parse(&["--max-cells", "0"]).is_err());
         assert!(parse(&["--threads"]).is_err());
+        assert!(parse(&["--canonicalisation", "other"]).is_err());
         assert!(parse(&["--unknown", "1"]).is_err());
     }
 }
