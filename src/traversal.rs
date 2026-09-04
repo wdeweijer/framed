@@ -107,7 +107,13 @@ pub fn traversal_normalisation(
     traversal_normalisation_of_shape(shape)
 }
 
-fn traversal_normalisation_of_shape(
+/// Relabel an OFP by the traversal used for polyvoxels.
+///
+/// This is the unchecked shape-level counterpart of
+/// [`traversal_normalisation`]. It is useful when polyvoxelhood is known from
+/// external provenance, such as an enumeration catalogue, but has not been
+/// reconstructed as a [`Polyvoxel`].
+pub fn traversal_normalisation_of_shape(
     shape: &Arc<FramedPoset>,
 ) -> Result<(Arc<FramedPoset>, Embedding), TraversalError> {
     let order = traverse_shape(shape)?;

@@ -311,6 +311,14 @@ impl FramedPoset {
         intset::collect_sorted(self.basis.iter().flatten().flatten().copied())
     }
 
+    /// Whether `direction` occurs in the basis of at least one cell.
+    pub fn has_active_direction(&self, direction: usize) -> bool {
+        self.basis
+            .iter()
+            .flatten()
+            .any(|basis| basis.binary_search(&direction).is_ok())
+    }
+
     /// Whether the undirected Hasse diagram is connected.
     ///
     /// Input and output cover relations are both treated as undirected edges.
@@ -621,44 +629,43 @@ pub fn shift(shape: &FramedPoset) -> FramedPoset {
 /// `direction` that have no opposite-signed cofaces and whose same-signed
 /// cofaces all have width in `direction`. Equivalently, these are the
 /// sign-maximal cells of the subposet orthogonal to `direction`.
+/// If `direction` is inactive, the boundary is the original shared OFP and
+/// the returned embedding is its identity.
 pub fn boundary(
     sign: Sign,
     direction: usize,
     shape: &Arc<FramedPoset>,
 ) -> (Arc<FramedPoset>, Embedding) {
-    if shape.dim < 0 {
-        (
-            Arc::new(FramedPoset::empty()),
-            Embedding::empty(Arc::clone(shape)),
-        )
-    } else {
-        let mut keep: Vec<Vec<bool>> = shape
-            .basis
-            .iter()
-            .map(|level| vec![false; level.len()])
-            .collect();
+    if !shape.has_active_direction(direction) {
+        return (Arc::clone(shape), Embedding::id(Arc::clone(shape)));
+    }
 
-        let opposite = sign.opposite();
-        for (dim, keep_level) in keep.iter_mut().enumerate() {
-            for (pos, is_kept) in keep_level.iter_mut().enumerate() {
-                if !shape.is_orthogonal_to(dim, pos, direction) {
-                    continue;
-                }
+    let mut keep: Vec<Vec<bool>> = shape
+        .basis
+        .iter()
+        .map(|level| vec![false; level.len()])
+        .collect();
 
-                let is_boundary_cell = shape.cofaces_of(opposite, dim, pos).is_empty()
-                    && shape
-                        .cofaces_of(sign, dim, pos)
-                        .iter()
-                        .all(|&coface| !shape.is_orthogonal_to(dim + 1, coface, direction));
-                if is_boundary_cell {
-                    *is_kept = true;
-                }
+    let opposite = sign.opposite();
+    for (dim, keep_level) in keep.iter_mut().enumerate() {
+        for (pos, is_kept) in keep_level.iter_mut().enumerate() {
+            if !shape.is_orthogonal_to(dim, pos, direction) {
+                continue;
+            }
+
+            let is_boundary_cell = shape.cofaces_of(opposite, dim, pos).is_empty()
+                && shape
+                    .cofaces_of(sign, dim, pos)
+                    .iter()
+                    .all(|&coface| !shape.is_orthogonal_to(dim + 1, coface, direction));
+            if is_boundary_cell {
+                *is_kept = true;
             }
         }
-
-        let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
-        closure(&subset)
     }
+
+    let subset = FramedPosetSubset::make(Arc::clone(shape), keep);
+    closure(&subset)
 }
 
 /// Apply a sequence of directional boundaries.
@@ -938,7 +945,11 @@ mod tests {
 
     #[test]
     fn active_directions_are_sorted_and_deduplicated() {
-        assert_eq!(square().active_directions(), vec![0, 1]);
+        let square = square();
+        assert_eq!(square.active_directions(), vec![0, 1]);
+        assert!(square.has_active_direction(0));
+        assert!(square.has_active_direction(1));
+        assert!(!square.has_active_direction(2));
     }
 
     #[test]
@@ -1282,6 +1293,22 @@ mod tests {
         let (output, output_emb) = boundary(Sign::Output, 0, &arrow);
         assert_eq!(output.sizes(), vec![1]);
         assert_eq!(output_emb.map, vec![vec![1]]);
+    }
+
+    #[test]
+    fn boundary_in_an_inactive_direction_is_the_shared_identity() {
+        let mut arrow = (*tight_arrow()).clone();
+        arrow.normal = true;
+        let arrow = Arc::new(arrow);
+
+        for sign in [Sign::Input, Sign::Output] {
+            let (boundary, embedding) = super::boundary(sign, 1, &arrow);
+            assert!(Arc::ptr_eq(&boundary, &arrow));
+            assert!(boundary.is_normal());
+            assert!(embedding.is_isomorphism());
+            assert!(Arc::ptr_eq(&embedding.dom, &arrow));
+            assert!(Arc::ptr_eq(&embedding.cod, &arrow));
+        }
     }
 
     #[test]

@@ -46,7 +46,9 @@ pub use random::{RandomFramedPosetGenerator, randomly_permute};
 pub use symmetry::{
     DirectionImage, SignedPermutation, SymmetryError, transform, transform_embedding,
 };
-pub use traversal::{TraversalError, traversal_normalisation, traversal_order};
+pub use traversal::{
+    TraversalError, traversal_normalisation, traversal_normalisation_of_shape, traversal_order,
+};
 pub use volumetric::{
     is_volumetric, satisfies_convolution_equations, satisfies_left_sign_equations,
     satisfies_right_sign_equations,
