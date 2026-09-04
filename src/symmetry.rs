@@ -195,7 +195,7 @@ impl SignedPermutation {
 
 /// Apply a signed permutation of directions to an oriented framed poset.
 ///
-/// Cell indices and unsigned cover relations are preserved. Bases are
+/// Cell indices and unsigned cover relations are preserved. Cell frames are
 /// permuted, and a cover relation changes sign exactly when its missing source
 /// direction is reflected. The result is not marked as normalized.
 pub fn transform(
@@ -204,14 +204,14 @@ pub fn transform(
 ) -> Result<FramedPoset, SymmetryError> {
     debug_assert!(shape.well_formed());
 
-    let basis = shape
-        .basis
+    let frames = shape
+        .frames
         .iter()
         .map(|level| {
             level
                 .iter()
-                .map(|cell_basis| {
-                    cell_basis
+                .map(|cell_frame| {
+                    cell_frame
                         .iter()
                         .map(|&direction| {
                             symmetry.image_of(direction).map_or_else(
@@ -244,8 +244,8 @@ pub fn transform(
             for sign in [Sign::Input, Sign::Output] {
                 for &face in shape.faces_of(sign, dim, cell) {
                     let direction = intset::cover_direction(
-                        shape.basis_of(dim - 1, face),
-                        shape.basis_of(dim, cell),
+                        shape.frame_of(dim - 1, face),
+                        shape.frame_of(dim, cell),
                     )
                     .expect("a cover in a well-formed OFP removes one direction");
                     let image =
@@ -270,7 +270,7 @@ pub fn transform(
         }
     }
 
-    let transformed = FramedPoset::from_faces(basis, faces_in, faces_out);
+    let transformed = FramedPoset::from_faces(frames, faces_in, faces_out);
     debug_assert!(transformed.well_formed());
     debug_assert!(!transformed.is_normal());
     Ok(transformed)
@@ -372,17 +372,17 @@ mod tests {
     }
 
     #[test]
-    fn permutation_relabels_bases_without_moving_cells() {
+    fn permutation_relabels_frames_without_moving_cells() {
         let transformed = transform(
             &square(),
             &SignedPermutation::from_permutation(vec![1, 0]).unwrap(),
         )
         .unwrap();
 
-        assert_eq!(transformed.basis_of(1, 0), &vec![1]);
-        assert_eq!(transformed.basis_of(1, 1), &vec![1]);
-        assert_eq!(transformed.basis_of(1, 2), &vec![0]);
-        assert_eq!(transformed.basis_of(2, 0), &vec![0, 1]);
+        assert_eq!(transformed.frame_of(1, 0), &vec![1]);
+        assert_eq!(transformed.frame_of(1, 1), &vec![1]);
+        assert_eq!(transformed.frame_of(1, 2), &vec![0]);
+        assert_eq!(transformed.frame_of(2, 0), &vec![0, 1]);
         assert_eq!(
             transformed.faces_of(Sign::Input, 2, 0),
             square().faces_of(Sign::Input, 2, 0)

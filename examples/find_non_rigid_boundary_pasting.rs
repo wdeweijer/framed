@@ -181,12 +181,12 @@ fn inspect_candidate(state: &mut SearchState, candidate: Candidate) -> io::Resul
         return Ok(None);
     }
 
-    for direction in candidate.shape.active_directions() {
+    for direction in candidate.shape.total_frame() {
         let (_, output_into_shape) = boundary(Sign::Output, direction, &candidate.shape);
         let (_, input_into_shape) = boundary(Sign::Input, direction, &candidate.shape);
         if output_into_shape.is_empty() || input_into_shape.is_empty() {
             return Err(io::Error::other(format!(
-                "rigid sample {} has an empty active direction {direction} boundary",
+                "rigid sample {} has an empty total-frame direction {direction} boundary",
                 candidate.sample
             )));
         }

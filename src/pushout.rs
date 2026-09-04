@@ -57,7 +57,7 @@ pub struct FiniteColimit {
 ///
 /// # Panics
 ///
-/// Panics unless there is exactly one signed, basis-preserving isomorphism
+/// Panics unless there is exactly one signed, frame-preserving isomorphism
 /// from the output boundary of `first` to the input boundary of `second`.
 pub fn paste_along_boundary(
     first: &Arc<FramedPoset>,
@@ -215,7 +215,7 @@ pub fn finite_colimit(objects: &[Arc<FramedPoset>], spans: &[ColimitSpan<'_>]) -
     }
 
     let levels = object_sizes.iter().map(Vec::len).max().unwrap_or(0);
-    let mut quotient_basis: Vec<Vec<IntSet>> = vec![Vec::new(); levels];
+    let mut quotient_frames: Vec<Vec<IntSet>> = vec![Vec::new(); levels];
     let mut quotient_cells = vec![None; next_global];
     let mut object_maps: Vec<Vec<Vec<usize>>> = object_sizes
         .iter()
@@ -231,11 +231,11 @@ pub fn finite_colimit(objects: &[Arc<FramedPoset>], spans: &[ColimitSpan<'_>]) -
                 let root = classes.find_mut(global_offsets[object_index][dim] + pos);
                 let quotient = if let Some((root_dim, root_pos)) = quotient_cells[root] {
                     debug_assert_eq!(root_dim, dim);
-                    debug_assert_eq!(quotient_basis[dim][root_pos], *object.basis_of(dim, pos));
+                    debug_assert_eq!(quotient_frames[dim][root_pos], *object.frame_of(dim, pos));
                     root_pos
                 } else {
-                    let quotient = quotient_basis[dim].len();
-                    quotient_basis[dim].push(object.basis_of(dim, pos).clone());
+                    let quotient = quotient_frames[dim].len();
+                    quotient_frames[dim].push(object.frame_of(dim, pos).clone());
                     quotient_cells[root] = Some((dim, quotient));
                     quotient
                 };
@@ -246,12 +246,12 @@ pub fn finite_colimit(objects: &[Arc<FramedPoset>], spans: &[ColimitSpan<'_>]) -
 
     debug_assert!(canonical_maps_are_injective(&object_maps));
 
-    let mut quotient_faces_in: Vec<Vec<IntSet>> = quotient_basis
+    let mut quotient_faces_in: Vec<Vec<IntSet>> = quotient_frames
         .iter()
         .map(|level| vec![vec![]; level.len()])
         .collect();
     let mut quotient_faces_out = quotient_faces_in.clone();
-    let mut defined: Vec<Vec<bool>> = quotient_basis
+    let mut defined: Vec<Vec<bool>> = quotient_frames
         .iter()
         .map(|level| vec![false; level.len()])
         .collect();
@@ -287,13 +287,13 @@ pub fn finite_colimit(objects: &[Arc<FramedPoset>], spans: &[ColimitSpan<'_>]) -
         }
     }
 
-    while quotient_basis.last().is_some_and(Vec::is_empty) {
-        quotient_basis.pop();
+    while quotient_frames.last().is_some_and(Vec::is_empty) {
+        quotient_frames.pop();
         quotient_faces_in.pop();
         quotient_faces_out.pop();
     }
     let tip = Arc::new(FramedPoset::from_faces(
-        quotient_basis,
+        quotient_frames,
         quotient_faces_in,
         quotient_faces_out,
     ));
@@ -387,8 +387,8 @@ mod tests {
         assert_eq!(po.tip.sizes(), vec![3, 2]);
         assert_eq!(po.inl.map, vec![vec![0, 1], vec![0]]);
         assert_eq!(po.inr.map, vec![vec![1, 2], vec![1]]);
-        assert_eq!(po.tip.basis_of(1, 0), &vec![0]);
-        assert_eq!(po.tip.basis_of(1, 1), &vec![0]);
+        assert_eq!(po.tip.frame_of(1, 0), &vec![0]);
+        assert_eq!(po.tip.frame_of(1, 1), &vec![0]);
         assert_eq!(po.tip.faces_of(Sign::Input, 1, 1), &vec![1]);
         assert_eq!(po.tip.faces_of(Sign::Output, 1, 1), &vec![2]);
     }
@@ -469,7 +469,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
-    fn pushout_detects_glued_basis_mismatch_in_debug() {
+    fn pushout_detects_glued_frame_mismatch_in_debug() {
         let base = Arc::new(FramedPoset::from_faces(
             vec![vec![vec![], vec![]], vec![vec![0]]],
             vec![vec![vec![], vec![]], vec![vec![0]]],

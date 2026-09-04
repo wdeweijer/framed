@@ -52,8 +52,7 @@ fn main() {
             let temperature = 1.0 - step as f64 / STEPS as f64;
             let accept = candidate_score <= current_score
                 || rng.random_bool(
-                    (-(candidate_score as f64 - current_score as f64)
-                        / (1.0 + 4.0 * temperature))
+                    (-(candidate_score as f64 - current_score as f64) / (1.0 + 4.0 * temperature))
                         .exp(),
                 );
             if accept {
@@ -169,9 +168,7 @@ fn check_state(shape: &Arc<FramedPoset>, directions: &[usize]) -> usize {
     let mut failures = 0;
     let boundaries = directions
         .iter()
-        .map(|&direction| {
-            [Sign::Input, Sign::Output].map(|sign| boundary(sign, direction, shape))
-        })
+        .map(|&direction| [Sign::Input, Sign::Output].map(|sign| boundary(sign, direction, shape)))
         .collect::<Vec<_>>();
     for left in 0..directions.len() {
         for right in left + 1..directions.len() {
@@ -179,24 +176,16 @@ fn check_state(shape: &Arc<FramedPoset>, directions: &[usize]) -> usize {
                 for (beta_index, beta) in [Sign::Input, Sign::Output].into_iter().enumerate() {
                     let (alpha_shape, alpha_into_shape) = &boundaries[left][alpha_index];
                     let (beta_shape, beta_into_shape) = &boundaries[right][beta_index];
-                    let (_, alpha_into_beta) =
-                        boundary(alpha, directions[left], beta_shape);
-                    let (_, beta_into_alpha) =
-                        boundary(beta, directions[right], alpha_shape);
-                    let alpha_after_beta =
-                        Embedding::compose(&alpha_into_beta, &beta_into_shape);
-                    let beta_after_alpha =
-                        Embedding::compose(&beta_into_alpha, &alpha_into_shape);
+                    let (_, alpha_into_beta) = boundary(alpha, directions[left], beta_shape);
+                    let (_, beta_into_alpha) = boundary(beta, directions[right], alpha_shape);
+                    let alpha_after_beta = Embedding::compose(&alpha_into_beta, &beta_into_shape);
+                    let beta_after_alpha = Embedding::compose(&beta_into_alpha, &alpha_into_shape);
                     let intersection =
                         Embedding::intersection(&alpha_into_shape, &beta_into_shape).into_codomain;
-                    failures += usize::from(!Embedding::same_subobject(
-                        &alpha_after_beta,
-                        &intersection,
-                    ));
-                    failures += usize::from(!Embedding::same_subobject(
-                        &beta_after_alpha,
-                        &intersection,
-                    ));
+                    failures +=
+                        usize::from(!Embedding::same_subobject(&alpha_after_beta, &intersection));
+                    failures +=
+                        usize::from(!Embedding::same_subobject(&beta_after_alpha, &intersection));
                 }
             }
         }
@@ -205,7 +194,7 @@ fn check_state(shape: &Arc<FramedPoset>, directions: &[usize]) -> usize {
 }
 
 struct FastShape {
-    basis: Vec<usize>,
+    frames: Vec<usize>,
     down: Vec<u64>,
     cofaces: [Vec<u64>; 2],
     neighbours: Vec<u64>,
@@ -214,7 +203,7 @@ struct FastShape {
 impl FastShape {
     fn new(cells: &[Cell], groups: &[IncidenceGroup], genes: &[usize]) -> Self {
         assert!(cells.len() <= 64);
-        let basis = cells.iter().map(|cell| cell.mask).collect::<Vec<_>>();
+        let frames = cells.iter().map(|cell| cell.mask).collect::<Vec<_>>();
         let mut direct_faces = vec![0u64; cells.len()];
         let mut cofaces = [vec![0u64; cells.len()], vec![0u64; cells.len()]];
         let mut neighbours = vec![0u64; cells.len()];
@@ -253,7 +242,7 @@ impl FastShape {
         }
 
         Self {
-            basis,
+            frames,
             down,
             cofaces,
             neighbours,
@@ -265,10 +254,10 @@ impl FastShape {
     }
 
     fn boundary_failures(&self) -> usize {
-        let full = if self.basis.len() == 64 {
+        let full = if self.frames.len() == 64 {
             u64::MAX
         } else {
-            (1 << self.basis.len()) - 1
+            (1 << self.frames.len()) - 1
         };
         let mut failures = self.check_state(full, &[0, 1, 2]);
         for first_direction in 0..3 {
@@ -300,18 +289,12 @@ impl FastShape {
                     for beta in 0..2 {
                         let intersection = boundaries[left][alpha] & boundaries[right][beta];
                         failures += usize::from(
-                            self.boundary(
-                                boundaries[right][beta],
-                                alpha,
-                                directions[left],
-                            ) != intersection,
+                            self.boundary(boundaries[right][beta], alpha, directions[left])
+                                != intersection,
                         );
                         failures += usize::from(
-                            self.boundary(
-                                boundaries[left][alpha],
-                                beta,
-                                directions[right],
-                            ) != intersection,
+                            self.boundary(boundaries[left][alpha], beta, directions[right])
+                                != intersection,
                         );
                     }
                 }
@@ -323,11 +306,11 @@ impl FastShape {
     fn boundary(&self, state: u64, sign: usize, direction: usize) -> u64 {
         let direction_bit = 1 << direction;
         let orthogonal = self
-            .basis
+            .frames
             .iter()
             .enumerate()
-            .fold(0u64, |mask, (cell, &basis)| {
-                mask | u64::from(basis & direction_bit == 0) << cell
+            .fold(0u64, |mask, (cell, &frame)| {
+                mask | u64::from(frame & direction_bit == 0) << cell
             });
         let mut candidates = state & orthogonal;
         let mut result = 0u64;
@@ -335,9 +318,7 @@ impl FastShape {
             let cell = candidates.trailing_zeros() as usize;
             candidates &= candidates - 1;
             let all_cofaces = (self.cofaces[0][cell] | self.cofaces[1][cell]) & state;
-            if self.cofaces[sign ^ 1][cell] & state == 0
-                && all_cofaces & orthogonal == 0
-            {
+            if self.cofaces[sign ^ 1][cell] & state == 0 && all_cofaces & orthogonal == 0 {
                 result |= self.down[cell];
             }
         }
@@ -349,13 +330,13 @@ impl FastShape {
     }
 
     fn component_count(&self) -> usize {
-        if self.basis.is_empty() {
+        if self.frames.is_empty() {
             return 0;
         }
-        let full = if self.basis.len() == 64 {
+        let full = if self.frames.len() == 64 {
             u64::MAX
         } else {
-            (1 << self.basis.len()) - 1
+            (1 << self.frames.len()) - 1
         };
         let mut unseen = full;
         let mut components = 0;
@@ -418,18 +399,14 @@ fn incidence_groups(profile: &[usize]) -> (Vec<Cell>, Vec<IncidenceGroup>) {
     (cells, groups)
 }
 
-fn make_shape(
-    cells: &[Cell],
-    groups: &[IncidenceGroup],
-    genes: &[usize],
-) -> Arc<FramedPoset> {
-    let mut basis = vec![Vec::new(); 3];
+fn make_shape(cells: &[Cell], groups: &[IncidenceGroup], genes: &[usize]) -> Arc<FramedPoset> {
+    let mut frames = vec![Vec::new(); 3];
     for cell in cells {
-        basis[cell.mask.count_ones() as usize]
+        frames[cell.mask.count_ones() as usize]
             .push((0..3).filter(|&i| cell.mask & (1 << i) != 0).collect());
     }
 
-    let mut faces_in: Vec<Vec<Vec<usize>>> = basis
+    let mut faces_in: Vec<Vec<Vec<usize>>> = frames
         .iter()
         .map(|level| vec![vec![]; level.len()])
         .collect();
@@ -451,5 +428,5 @@ fn make_shape(
     for row in faces_in.iter_mut().chain(&mut faces_out).flatten() {
         row.sort_unstable();
     }
-    Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out))
+    Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out))
 }

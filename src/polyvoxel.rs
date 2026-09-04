@@ -31,7 +31,7 @@ impl Polyvoxel {
         &self.shape
     }
 
-    /// The rank, equal to one more than the greatest active direction.
+    /// The rank, equal to one more than the greatest direction in the total frame.
     ///
     /// The point has rank zero.
     pub fn rank(&self) -> usize {
@@ -40,7 +40,7 @@ impl Polyvoxel {
 
     /// The finite vector representing the length function below the rank.
     ///
-    /// An entry is zero exactly when its index is not an active direction.
+    /// An entry is zero exactly when its index is outside the total frame.
     pub fn length(&self) -> &[usize] {
         &self.length
     }
@@ -169,7 +169,7 @@ pub fn paste(left: &Polyvoxel, right: &Polyvoxel, direction: usize) -> (Pushout,
     let right_length = right.length_at(direction);
     assert!(
         left_length > 0 && right_length > 0,
-        "pasting direction {direction} must be active in both polyvoxels",
+        "pasting direction {direction} must belong to both polyvoxels' total frames",
     );
 
     let pushout = paste_along_boundary(left.as_framed_poset(), right.as_framed_poset(), direction);
@@ -207,13 +207,13 @@ mod tests {
             polyvoxel_layering_direction(polyvoxel.as_framed_poset())
         );
 
-        let frame = polyvoxel.active_directions();
-        let expected_rank = frame.last().map_or(0, |direction| direction + 1);
+        let total_frame = polyvoxel.total_frame();
+        let expected_rank = total_frame.last().map_or(0, |direction| direction + 1);
         assert_eq!(polyvoxel.rank(), expected_rank);
         for direction in 0..polyvoxel.rank() {
             assert_eq!(
                 polyvoxel.length_at(direction) == 0,
-                frame.binary_search(&direction).is_err()
+                total_frame.binary_search(&direction).is_err()
             );
         }
         assert_eq!(polyvoxel.length_at(polyvoxel.rank() + 3), 0);
@@ -229,7 +229,7 @@ mod tests {
 
         assert_eq!(point.sizes(), vec![1]);
         assert_eq!(arrow.sizes(), vec![2, 1]);
-        assert_eq!(shifted_arrow.active_directions(), vec![1]);
+        assert_eq!(shifted_arrow.total_frame(), vec![1]);
         assert_eq!(path.sizes(), vec![3, 2]);
         assert!(path.greatest_element().is_none());
         assert!(Arc::ptr_eq(path.as_framed_poset(), &path_pushout.tip));
@@ -285,8 +285,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "pasting direction 0 must be active in both polyvoxels")]
-    fn paste_rejects_an_inactive_direction() {
+    #[should_panic(expected = "pasting direction 0 must belong to both polyvoxels' total frames")]
+    fn paste_rejects_a_direction_outside_the_total_frame() {
         let point = point();
 
         let _ = paste(&point, &point, 0);

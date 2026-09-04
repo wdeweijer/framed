@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ofposets::{
-    CubularityMode, Embedding, FramedPoset, Renderer, Sign, boundary,
-    embedding_to_dot, is_cubular, to_dot,
+    CubularityMode, Embedding, FramedPoset, Renderer, Sign, boundary, embedding_to_dot, is_cubular,
+    to_dot,
 };
 
 const OUTPUT_DIR: &str = "visualizations/conn_cubular_frame";
@@ -23,7 +23,7 @@ fn main() -> io::Result<()> {
 
     let source =
         Arc::new(serde_json::from_str::<FramedPoset>(SOURCE_JSON).map_err(io::Error::other)?);
-    let frame = source.active_directions();
+    let total_frame = source.total_frame();
     let dimension = usize::try_from(source.dim()).expect("the counterexample is non-empty");
 
     assert!(
@@ -35,11 +35,11 @@ fn main() -> io::Result<()> {
         "the counterexample must be strongly cubular"
     );
     assert_ne!(
-        frame.len(),
+        total_frame.len(),
         dimension,
-        "the frame cardinality must differ from the dimension"
+        "the total-frame cardinality must differ from the dimension"
     );
-    assert_eq!(frame, vec![0, 1, 2]);
+    assert_eq!(total_frame, vec![0, 1, 2]);
     assert_eq!(dimension, 2);
 
     write_shape_layouts(output_dir, "source", &source)?;
@@ -51,8 +51,8 @@ fn main() -> io::Result<()> {
         ),
     )?;
 
-    let states = boundary_states(&source, &frame);
-    assert_eq!(states.len(), 3_usize.pow(frame.len() as u32) - 1);
+    let states = boundary_states(&source, &total_frame);
+    assert_eq!(states.len(), 3_usize.pow(total_frame.len() as u32) - 1);
 
     let mut intersection_count = 0;
     for state in &states {
@@ -72,7 +72,7 @@ fn main() -> io::Result<()> {
 
     assert_eq!(intersection_count, 20);
     println!(
-        "verified a connected, strongly cubular OFP with frame {frame:?} and dimension {dimension}"
+        "verified a connected, strongly cubular OFP with total frame {total_frame:?} and dimension {dimension}"
     );
     println!(
         "wrote {} iterated boundaries and {intersection_count} intersections to {}",
@@ -83,7 +83,7 @@ fn main() -> io::Result<()> {
 }
 
 /// Enumerate one representative for every non-empty signed subset of the
-/// frame. Directions are applied in increasing order; strong cubularity says
+/// total frame. Directions are applied in increasing order; strong cubularity says
 /// that every other ordering gives the same embedding into the source.
 fn boundary_states(source: &Arc<FramedPoset>, directions: &[usize]) -> Vec<BoundaryState> {
     let mut states = Vec::new();

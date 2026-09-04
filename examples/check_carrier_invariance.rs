@@ -9,20 +9,12 @@ use rand::rngs::SmallRng;
 
 fn main() {
     check_generator(
-        &RandomFramedPosetGenerator::new_without_full_basis(3, 9),
+        &RandomFramedPosetGenerator::new_without_full_frame(3, 9),
         20_000,
         0x0a11ce55,
     );
-    check_generator(
-        &RandomFramedPosetGenerator::new(2, 9),
-        20_000,
-        0xca441e42,
-    );
-    check_generator(
-        &RandomFramedPosetGenerator::new(3, 13),
-        5_000,
-        0x3dca441e,
-    );
+    check_generator(&RandomFramedPosetGenerator::new(2, 9), 20_000, 0xca441e42);
+    check_generator(&RandomFramedPosetGenerator::new(3, 13), 5_000, 0x3dca441e);
 }
 
 fn check_generator(generator: &RandomFramedPosetGenerator, samples: u64, seed: u64) {
@@ -40,15 +32,13 @@ fn check_generator(generator: &RandomFramedPosetGenerator, samples: u64, seed: u
         }
         connected_strong += 1;
         if let Some((left, right)) = incomparable_carriers(&shape) {
-            println!(
-                "INCOMPARABLE CARRIERS sample={sample}: {left:?} and {right:?}"
-            );
+            println!("INCOMPARABLE CARRIERS sample={sample}: {left:?} and {right:?}");
             println!("{}", serde_json::to_string_pretty(&*shape).unwrap());
             return;
         }
     }
     println!(
-        "maximal bases were a chain in all {connected_strong}/{strong} connected/total strongly +         cubular samples from generator {:?}",
+        "maximal frames were a chain in all {connected_strong}/{strong} connected/total strongly cubular samples from generator {:?}",
         generator
     );
 }
@@ -67,11 +57,12 @@ fn incomparable_carriers(shape: &Arc<FramedPoset>) -> Option<(Vec<usize>, Vec<us
 }
 
 fn is_subset(left: &[usize], right: &[usize]) -> bool {
-    left.iter().all(|element| right.binary_search(element).is_ok())
+    left.iter()
+        .all(|element| right.binary_search(element).is_ok())
 }
 
 fn carriers(shape: &Arc<FramedPoset>) -> Vec<Vec<Vec<usize>>> {
-    let directions = shape.active_directions();
+    let directions = shape.total_frame();
     let boundaries = directions
         .iter()
         .map(|&direction| {

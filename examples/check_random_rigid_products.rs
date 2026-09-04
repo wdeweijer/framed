@@ -52,8 +52,8 @@ fn main() -> io::Result<()> {
             let right_offset = options.dimension;
             let right = shift_by(candidate, right_offset);
             debug_assert!(ofposets::intset::is_disjoint(
-                &left.active_directions(),
-                &right.active_directions(),
+                &left.total_frame(),
+                &right.total_frame(),
             ));
             let product = orthogonal_product(&left, &right);
             products += 1;

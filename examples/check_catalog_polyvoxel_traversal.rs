@@ -145,7 +145,8 @@ struct RawCatalogRecord {
     version: usize,
     id: usize,
     cells: usize,
-    active_directions: Vec<usize>,
+    #[serde(rename = "active_directions")]
+    total_frame: Vec<usize>,
     #[serde(rename = "length")]
     _length: Vec<usize>,
     #[serde(rename = "layering_direction")]
@@ -310,10 +311,10 @@ fn load_records(path: &Path, limit: Option<usize>) -> io::Result<Vec<CatalogReco
                 raw.cells,
             )));
         }
-        let actual_directions = raw.ofp.active_directions();
-        if raw.active_directions != actual_directions {
+        let actual_total_frame = raw.ofp.total_frame();
+        if raw.total_frame != actual_total_frame {
             return Err(invalid_data(format!(
-                "{}:{line_number}: record {} has incorrect active directions",
+                "{}:{line_number}: record {} has an incorrect total frame",
                 path.display(),
                 raw.id,
             )));

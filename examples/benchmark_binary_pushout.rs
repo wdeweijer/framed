@@ -253,11 +253,11 @@ fn legacy_multi_pushout(base: &Arc<FramedPoset>, spans: &[Span<'_>]) -> MultiPus
         .map(|dimension| base_level_sizes[dimension] + extra_counts[dimension])
         .collect();
 
-    let mut tip_basis = alloc_rows(
+    let mut tip_frames = alloc_rows(
         base,
         &base_sizes,
         &total_sizes,
-        |shape, dimension, position| shape.basis_of(dimension, position).clone(),
+        |shape, dimension, position| shape.frame_of(dimension, position).clone(),
     );
     let mut tip_faces_in = alloc_rows(
         base,
@@ -309,7 +309,7 @@ fn legacy_multi_pushout(base: &Arc<FramedPoset>, spans: &[Span<'_>]) -> MultiPus
                 counters[dimension] += 1;
                 map[dimension][position] = target;
                 inv[dimension][target] = position;
-                tip_basis[dimension][target] = extension.basis_of(dimension, position).clone();
+                tip_frames[dimension][target] = extension.frame_of(dimension, position).clone();
 
                 if dimension > 0 {
                     let input_faces = intset::collect_sorted(
@@ -339,7 +339,7 @@ fn legacy_multi_pushout(base: &Arc<FramedPoset>, spans: &[Span<'_>]) -> MultiPus
     }
 
     let tip = Arc::new(FramedPoset::make(
-        tip_basis,
+        tip_frames,
         tip_faces_in,
         tip_faces_out,
         tip_cofaces_in,

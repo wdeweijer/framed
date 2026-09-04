@@ -9,9 +9,9 @@ use crate::poset::{Element, FramedPoset, FramedPosetSubset, Sign, boundary, clos
 /// Sentinel stored in inverse maps when a codomain cell has no preimage.
 pub const NO_PREIMAGE: usize = usize::MAX;
 
-/// An injective basis-preserving map of framed posets.
+/// An injective frame-preserving map of framed posets.
 ///
-/// The map is indexed by basis cardinality:
+/// The map is indexed by frame cardinality:
 /// - `map[d][i]` is the codomain index of domain cell `i` at level `d`.
 /// - `inv[d][j]` is the domain preimage of codomain cell `j`, or
 ///   [`NO_PREIMAGE`] when no preimage exists.
@@ -329,7 +329,7 @@ impl Embedding {
                 if self.inv[dim][cod_pos] != dom_pos {
                     return false;
                 }
-                if self.dom.basis_of(dim, dom_pos) != self.cod.basis_of(dim, cod_pos) {
+                if self.dom.frame_of(dim, dom_pos) != self.cod.frame_of(dim, cod_pos) {
                     return false;
                 }
             }

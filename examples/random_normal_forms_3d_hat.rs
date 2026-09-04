@@ -667,7 +667,7 @@ fn validate_representative(
             "orbit representative does not have {cell_count} cells"
         )));
     }
-    if representative.active_directions() != [0, 1, 2] {
+    if representative.total_frame() != [0, 1, 2] {
         return Err(io::Error::other(
             "orbit representative does not use precisely directions 0, 1, and 2",
         ));

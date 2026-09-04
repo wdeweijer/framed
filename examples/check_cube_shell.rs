@@ -41,7 +41,10 @@ fn main() {
     );
     if is_cubular(CubularityMode::Strong, &vertex_reduced) {
         println!("TWO-VERTEX COUNTEREXAMPLE");
-        println!("{}", serde_json::to_string_pretty(&*vertex_reduced).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&*vertex_reduced).unwrap()
+        );
         return;
     }
 
@@ -60,9 +63,9 @@ fn main() {
 
     let smaller = joined_one_sided_cells_with_one_common_shadow();
     println!(
-        "smaller joined one-sided cells: sizes={:?}, frame={:?}, dim={}, connected={}, strong={}",
+        "smaller joined one-sided cells: sizes={:?}, total_frame={:?}, dim={}, connected={}, strong={}",
         smaller.sizes(),
-        smaller.active_directions(),
+        smaller.total_frame(),
         smaller.dim(),
         smaller.is_connected(),
         is_cubular(CubularityMode::Strong, &smaller),
@@ -75,9 +78,9 @@ fn main() {
 
     let candidate = joined_one_sided_cells();
     println!(
-        "joined one-sided cells: sizes={:?}, frame={:?}, dim={}, connected={}, strong={}",
+        "joined one-sided cells: sizes={:?}, total_frame={:?}, dim={}, connected={}, strong={}",
         candidate.sizes(),
-        candidate.active_directions(),
+        candidate.total_frame(),
         candidate.dim(),
         candidate.is_connected(),
         is_cubular(CubularityMode::Strong, &candidate),
@@ -106,7 +109,7 @@ fn main() {
         return;
     }
 
-    let generator = RandomFramedPosetGenerator::new_without_full_basis(3, 9);
+    let generator = RandomFramedPosetGenerator::new_without_full_frame(3, 9);
     for sample in 1..=200_000u64 {
         let mut rng = SmallRng::seed_from_u64(0x0a11ce55u64.wrapping_add(sample));
         let shape = Arc::new(generator.generate(&mut rng));
@@ -173,9 +176,7 @@ fn main() {
         for second_vertex in 0..4 {
             let bridge = two_sided_bridged_squares(first_vertex, second_vertex);
             if is_cubular(CubularityMode::Strong, &bridge) {
-                println!(
-                    "STRONG two-sided bridge: first={first_vertex}, second={second_vertex}"
-                );
+                println!("STRONG two-sided bridge: first={first_vertex}, second={second_vertex}");
                 println!("{}", serde_json::to_string_pretty(&*bridge).unwrap());
                 return;
             }
@@ -188,9 +189,7 @@ fn main() {
         for orientations in 0..16 {
             let shape = matched_bridged_squares(permutation, orientations);
             if is_cubular(CubularityMode::Strong, &shape) {
-                println!(
-                    "COUNTEREXAMPLE matching={permutation:?}, orientations={orientations:#x}"
-                );
+                println!("COUNTEREXAMPLE matching={permutation:?}, orientations={orientations:#x}");
                 println!("{}", serde_json::to_string_pretty(&*shape).unwrap());
                 return;
             }
@@ -213,7 +212,7 @@ fn main() {
     }
 
     let profiles: [&[usize]; 8] = [
-        // Counts indexed by the basis bit mask: empty, 0, 1, 01, 2, 02, 12.
+        // Counts indexed by the frame bit mask: empty, 0, 1, 01, 2, 02, 12.
         &[1, 2, 2, 1, 0, 0, 0],
         &[2, 2, 2, 1, 0, 0, 0],
         &[1, 1, 1, 1, 1, 0, 0],
@@ -232,13 +231,7 @@ fn main() {
             .product::<usize>();
         let mut choices = vec![0; groups.len()];
         let mut checked = 0usize;
-        let witness = enumerate(
-            0,
-            &cells,
-            &groups,
-            &mut choices,
-            &mut checked,
-        );
+        let witness = enumerate(0, &cells, &groups, &mut choices, &mut checked);
         println!(
             "profile={profile:?}: checked {checked}/{total}; strong={}",
             witness.is_some()
@@ -252,7 +245,7 @@ fn main() {
 
 fn search_missing_outer_shadow_orientations() -> Option<Arc<FramedPoset>> {
     for reflected in [false, true] {
-        let bases = if reflected {
+        let frames = if reflected {
             vec![vec![0], vec![0], vec![1], vec![1], vec![1], vec![2]]
         } else {
             vec![vec![0], vec![1], vec![1], vec![1], vec![2], vec![2]]
@@ -287,15 +280,13 @@ fn search_missing_outer_shadow_orientations() -> Option<Arc<FramedPoset>> {
             let shape = Arc::new(FramedPoset::from_faces(
                 vec![
                     vec![vec![], vec![], vec![]],
-                    bases.clone(),
+                    frames.clone(),
                     vec![vec![0, 1], vec![1, 2]],
                 ],
                 faces[0].clone(),
                 faces[1].clone(),
             ));
-            if shape.is_connected()
-                && is_cubular(CubularityMode::Strong, &shape)
-            {
+            if shape.is_connected() && is_cubular(CubularityMode::Strong, &shape) {
                 return Some(shape);
             }
         }
@@ -328,22 +319,13 @@ fn search_shadowless_orientations() -> Option<Arc<FramedPoset>> {
         let shape = Arc::new(FramedPoset::from_faces(
             vec![
                 vec![vec![], vec![], vec![]],
-                vec![
-                    vec![0],
-                    vec![0],
-                    vec![1],
-                    vec![1],
-                    vec![2],
-                    vec![2],
-                ],
+                vec![vec![0], vec![0], vec![1], vec![1], vec![2], vec![2]],
                 vec![vec![0, 1], vec![1, 2]],
             ],
             faces[0].clone(),
             faces[1].clone(),
         ));
-        if shape.is_connected()
-            && is_cubular(CubularityMode::Strong, &shape)
-        {
+        if shape.is_connected() && is_cubular(CubularityMode::Strong, &shape) {
             return Some(shape);
         }
     }
@@ -377,20 +359,11 @@ fn search_two_vertex_one_sided_counterexample() -> Option<Arc<FramedPoset>> {
                             vec![
                                 vec![vec![]; 2],
                                 edge_faces.clone(),
-                                vec![
-                                    vec![first_zero, first_one],
-                                    vec![second_one, second_two],
-                                ],
+                                vec![vec![first_zero, first_one], vec![second_one, second_two]],
                             ],
-                            vec![
-                                vec![vec![]; 2],
-                                vec![vec![]; 7],
-                                vec![vec![], vec![]],
-                            ],
+                            vec![vec![vec![]; 2], vec![vec![]; 7], vec![vec![], vec![]]],
                         ));
-                        if shape.is_connected()
-                            && is_cubular(CubularityMode::Strong, &shape)
-                        {
+                        if shape.is_connected() && is_cubular(CubularityMode::Strong, &shape) {
                             return Some(shape);
                         }
                     }
@@ -430,11 +403,7 @@ fn joined_one_sided_cells_with_two_vertices() -> Arc<FramedPoset> {
             ],
             vec![vec![0, 2], vec![3, 5]],
         ],
-        vec![
-            vec![vec![]; 2],
-            vec![vec![]; 7],
-            vec![vec![], vec![]],
-        ],
+        vec![vec![vec![]; 2], vec![vec![]; 7], vec![vec![], vec![]]],
     ))
 }
 
@@ -442,33 +411,15 @@ fn joined_one_sided_cells_without_common_shadow() -> Arc<FramedPoset> {
     Arc::new(FramedPoset::from_faces(
         vec![
             vec![vec![], vec![], vec![]],
-            vec![
-                vec![0],
-                vec![0],
-                vec![1],
-                vec![1],
-                vec![2],
-                vec![2],
-            ],
+            vec![vec![0], vec![0], vec![1], vec![1], vec![2], vec![2]],
             vec![vec![0, 1], vec![1, 2]],
         ],
         vec![
             vec![vec![]; 3],
-            vec![
-                vec![0],
-                vec![0],
-                vec![1],
-                vec![1],
-                vec![2],
-                vec![2],
-            ],
+            vec![vec![0], vec![0], vec![1], vec![1], vec![2], vec![2]],
             vec![vec![0, 2], vec![3, 4]],
         ],
-        vec![
-            vec![vec![]; 3],
-            vec![vec![]; 6],
-            vec![vec![], vec![]],
-        ],
+        vec![vec![vec![]; 3], vec![vec![]; 6], vec![vec![], vec![]]],
     ))
 }
 
@@ -500,11 +451,7 @@ fn joined_one_sided_cells_with_one_common_shadow() -> Arc<FramedPoset> {
             ],
             vec![vec![0, 2], vec![3, 5]],
         ],
-        vec![
-            vec![vec![]; 3],
-            vec![vec![]; 7],
-            vec![vec![], vec![]],
-        ],
+        vec![vec![vec![]; 3], vec![vec![]; 7], vec![vec![], vec![]]],
     ))
 }
 
@@ -538,11 +485,7 @@ fn joined_one_sided_cells() -> Arc<FramedPoset> {
             ],
             vec![vec![0, 2], vec![4, 6]],
         ],
-        vec![
-            vec![vec![]; 3],
-            vec![vec![]; 8],
-            vec![vec![], vec![]],
-        ],
+        vec![vec![vec![]; 3], vec![vec![]; 8], vec![vec![], vec![]]],
     ))
 }
 
@@ -611,10 +554,7 @@ fn cycle_bridged_squares() -> Arc<FramedPoset> {
     ))
 }
 
-fn matched_bridged_squares(
-    matching: [usize; 4],
-    orientations: usize,
-) -> Arc<FramedPoset> {
+fn matched_bridged_squares(matching: [usize; 4], orientations: usize) -> Arc<FramedPoset> {
     let mut bridge_inputs = Vec::new();
     let mut bridge_outputs = Vec::new();
     for (first, &second) in matching.iter().enumerate() {
@@ -695,13 +635,19 @@ fn next_permutation(values: &mut [usize]) -> bool {
     true
 }
 
-fn two_sided_bridged_squares(
-    first_vertex: usize,
-    second_vertex: usize,
-) -> Arc<FramedPoset> {
+fn two_sided_bridged_squares(first_vertex: usize, second_vertex: usize) -> Arc<FramedPoset> {
     Arc::new(FramedPoset::from_faces(
         vec![
-            vec![vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]],
+            vec![
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            ],
             vec![
                 vec![0],
                 vec![0],
@@ -810,16 +756,20 @@ fn doubly_attached_bridged_squares(
             ],
             vec![vec![0, 1], vec![1, 2]],
         ],
-        vec![vec![vec![]; next], edge_inputs, vec![vec![0, 2], vec![4, 6]]],
-        vec![vec![vec![]; next], edge_outputs, vec![vec![1, 3], vec![5, 7]]],
+        vec![
+            vec![vec![]; next],
+            edge_inputs,
+            vec![vec![0, 2], vec![4, 6]],
+        ],
+        vec![
+            vec![vec![]; next],
+            edge_outputs,
+            vec![vec![1, 3], vec![5, 7]],
+        ],
     ))
 }
 
-fn bridged_squares(
-    first_vertex: usize,
-    second_vertex: usize,
-    reversed: bool,
-) -> Arc<FramedPoset> {
+fn bridged_squares(first_vertex: usize, second_vertex: usize, reversed: bool) -> Arc<FramedPoset> {
     let (bridge_input, bridge_output) = if reversed {
         (4 + second_vertex, first_vertex)
     } else {
@@ -827,7 +777,16 @@ fn bridged_squares(
     };
     Arc::new(FramedPoset::from_faces(
         vec![
-            vec![vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]],
+            vec![
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            ],
             vec![
                 vec![0],
                 vec![0],
@@ -928,8 +887,8 @@ fn enumerate(
         let shape = make_shape(cells, groups, choices);
         return (is_cubular(CubularityMode::Strong, &shape)
             && shape.is_connected()
-            && has_incomparable_maximal_bases(&shape))
-            .then_some(shape);
+            && has_incomparable_maximal_frames(&shape))
+        .then_some(shape);
     }
 
     let radix = 3usize.pow(groups[group].faces.len() as u32);
@@ -942,8 +901,8 @@ fn enumerate(
     None
 }
 
-fn has_incomparable_maximal_bases(shape: &FramedPoset) -> bool {
-    let bases = shape
+fn has_incomparable_maximal_frames(shape: &FramedPoset) -> bool {
+    let frames = shape
         .sizes()
         .into_iter()
         .enumerate()
@@ -951,11 +910,11 @@ fn has_incomparable_maximal_bases(shape: &FramedPoset) -> bool {
             shape
                 .maximal(dim)
                 .into_iter()
-                .map(move |pos| shape.basis_of(dim, pos))
+                .map(move |pos| shape.frame_of(dim, pos))
         })
         .collect::<Vec<_>>();
-    bases.iter().enumerate().any(|(left, a)| {
-        bases[left + 1..]
+    frames.iter().enumerate().any(|(left, a)| {
+        frames[left + 1..]
             .iter()
             .any(|b| !is_subset(a, b) && !is_subset(b, a))
     })
@@ -966,21 +925,17 @@ fn is_subset(left: &[usize], right: &[usize]) -> bool {
         .all(|direction| right.binary_search(direction).is_ok())
 }
 
-fn make_shape(
-    cells: &[Cell],
-    groups: &[IncidenceGroup],
-    choices: &[usize],
-) -> Arc<FramedPoset> {
-    let mut basis = vec![Vec::new(); 3];
+fn make_shape(cells: &[Cell], groups: &[IncidenceGroup], choices: &[usize]) -> Arc<FramedPoset> {
+    let mut frames = vec![Vec::new(); 3];
     for cell in cells {
-        basis[cell.mask.count_ones() as usize]
+        frames[cell.mask.count_ones() as usize]
             .push((0..3).filter(|&i| cell.mask & (1 << i) != 0).collect());
     }
-    while basis.last().is_some_and(Vec::is_empty) {
-        basis.pop();
+    while frames.last().is_some_and(Vec::is_empty) {
+        frames.pop();
     }
 
-    let mut faces_in: Vec<Vec<Vec<usize>>> = basis
+    let mut faces_in: Vec<Vec<Vec<usize>>> = frames
         .iter()
         .map(|level| vec![vec![]; level.len()])
         .collect();
@@ -1003,5 +958,5 @@ fn make_shape(
         row.sort_unstable();
     }
 
-    Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out))
+    Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out))
 }

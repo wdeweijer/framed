@@ -646,7 +646,7 @@ impl BoundaryIndex {
                     .or_default()
                     .push(index);
             }
-            for &direction in &entry.frame {
+            for &direction in &entry.total_frame {
                 let boundary = entry.boundary(direction);
                 self.paste_inputs
                     .entry((direction, boundary.input().hash, boundary.input().cells))
@@ -763,13 +763,13 @@ fn push_cylinder_job_if_compatible(
 
 fn cylinder_frames_compatible(input: &SnapshotEntry, output: &SnapshotEntry) -> bool {
     let input_without_zero: IntSet = input
-        .frame
+        .total_frame
         .iter()
         .copied()
         .filter(|&direction| direction != 0)
         .collect();
-    intset::is_subset(&input_without_zero, &output.frame)
-        && intset::is_subset(&output.frame, &input.frame)
+    intset::is_subset(&input_without_zero, &output.total_frame)
+        && intset::is_subset(&output.total_frame, &input.total_frame)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -920,7 +920,7 @@ fn push_paste_jobs_with_new_left(
     batch: &mut PasteCandidateBatch,
 ) {
     let left_entry = &entries[left];
-    for &direction in &left_entry.frame {
+    for &direction in &left_entry.total_frame {
         let left_boundary = left_entry.boundary(direction).output();
         batch.counts.boundary_index_lookups += 1;
         if let Some(rights) =
@@ -960,7 +960,7 @@ fn push_paste_jobs_with_new_right(
     batch: &mut PasteCandidateBatch,
 ) {
     let right_entry = &entries[right];
-    for &direction in &right_entry.frame {
+    for &direction in &right_entry.total_frame {
         let right_boundary = right_entry.boundary(direction).input();
         batch.counts.boundary_index_lookups += 1;
         if let Some(lefts) = boundary_index.paste_outputs.get(&(
@@ -1054,7 +1054,7 @@ fn prepare_candidate(
     length_bound: Option<usize>,
 ) -> Option<PreparedCandidate> {
     if cell_count(&candidate.shape) > max_cells
-        || !intset::is_subset(&candidate.shape.active_directions(), allowed_directions)
+        || !intset::is_subset(&candidate.shape.total_frame(), allowed_directions)
         || length_bound.is_some_and(|bound| {
             candidate
                 .shape
@@ -1144,7 +1144,7 @@ struct SnapshotEntry {
     shape: Polyvoxel,
     is_voxel: bool,
     cells: usize,
-    frame: IntSet,
+    total_frame: IntSet,
     boundaries: Arc<Vec<DirectionalBoundaryCache>>,
 }
 
@@ -1173,7 +1173,7 @@ struct WorkingEntry {
     canonical_shape: Arc<FramedPoset>,
     canonical_into_shape: Option<Embedding>,
     cells: usize,
-    frame: IntSet,
+    total_frame: IntSet,
     boundaries: Option<Arc<Vec<DirectionalBoundaryCache>>>,
     is_voxel: bool,
     factorizations: BTreeSet<PolyvoxelFactorization>,
@@ -1243,7 +1243,7 @@ impl CatalogBuilder {
         debug_assert!(shape.well_formed());
         debug_assert!(is_volumetric(shape.as_framed_poset()));
         let cells = cell_count(&shape);
-        let frame = shape.active_directions();
+        let total_frame = shape.total_frame();
         let index = self.entries.len();
         self.indices.insert(Arc::clone(&canonical_shape), index);
         self.entries.push(WorkingEntry {
@@ -1251,7 +1251,7 @@ impl CatalogBuilder {
             canonical_shape,
             canonical_into_shape: Some(canonical_into_shape),
             cells,
-            frame,
+            total_frame,
             boundaries: None,
             is_voxel,
             factorizations: BTreeSet::from([factorization]),
@@ -1269,7 +1269,7 @@ impl CatalogBuilder {
             .par_iter_mut()
             .filter(|entry| entry.boundaries.is_none())
             .for_each(|entry| {
-                let mut directions = entry.frame.clone();
+                let mut directions = entry.total_frame.clone();
                 if cylinder_enabled {
                     intset::insert(&mut directions, 0);
                 }
@@ -1282,7 +1282,7 @@ impl CatalogBuilder {
                         .iter()
                         .copied()
                         .map(|direction| {
-                            if entry.frame.binary_search(&direction).is_err() {
+                            if entry.total_frame.binary_search(&direction).is_err() {
                                 debug_assert_eq!(direction, 0);
                                 let boundary = BoundaryNormalForm::from_normalisation(
                                     Arc::clone(&entry.canonical_shape),
@@ -1317,7 +1317,7 @@ impl CatalogBuilder {
                 shape: entry.shape.clone(),
                 is_voxel: entry.is_voxel,
                 cells: entry.cells,
-                frame: entry.frame.clone(),
+                total_frame: entry.total_frame.clone(),
                 boundaries: Arc::clone(
                     entry
                         .boundaries
@@ -1388,7 +1388,7 @@ mod tests {
             catalog
                 .entries()
                 .iter()
-                .map(|entry| entry.shape.active_directions())
+                .map(|entry| entry.shape.total_frame())
                 .collect::<Vec<_>>(),
             vec![vec![], vec![0], vec![1], vec![2]],
         );
@@ -1575,7 +1575,7 @@ mod tests {
                 shape: entry.shape.clone(),
                 is_voxel: entry.is_voxel,
                 cells: cell_count(&entry.shape),
-                frame: entry.shape.active_directions(),
+                total_frame: entry.shape.total_frame(),
                 boundaries: Arc::new(
                     directions
                         .iter()
@@ -1641,8 +1641,8 @@ mod tests {
         let mut pairwise_pastes = Vec::new();
         for (left, left_entry) in entries.iter().enumerate() {
             for (right, right_entry) in entries.iter().enumerate() {
-                for &direction in &left_entry.frame {
-                    if right_entry.frame.binary_search(&direction).is_err() {
+                for &direction in &left_entry.total_frame {
+                    if right_entry.total_frame.binary_search(&direction).is_err() {
                         continue;
                     }
                     let left_boundary =

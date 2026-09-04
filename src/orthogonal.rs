@@ -9,8 +9,8 @@ use crate::poset::{FramedPoset, Sign};
 
 /// Form the orthogonal tensor product of two framed posets.
 ///
-/// Its cells are pairs whose bases are disjoint. The basis of a retained pair
-/// is the union of the two bases, and a signed cover changes one coordinate
+/// Its cells are pairs whose frames are disjoint. The frame of a retained pair
+/// is the union of the two frames, and a signed cover changes one coordinate
 /// along a cover of the same sign in that factor.
 pub fn orthogonal_product(left: &FramedPoset, right: &FramedPoset) -> FramedPoset {
     orthogonal_product_data(left, right).shape
@@ -142,7 +142,7 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
 
     let level_count = left_sizes.len() + right_sizes.len() - 1;
     let mut cell_pairs = HashMap::new();
-    let mut basis = vec![Vec::new(); level_count];
+    let mut frames = vec![Vec::new(); level_count];
     let mut product_cells = vec![Vec::new(); level_count];
 
     for (left_dim, &left_size) in left_sizes.iter().enumerate() {
@@ -154,8 +154,8 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
             for (right_dim, &right_size) in right_sizes.iter().enumerate() {
                 for right_pos in 0..right_size {
                     if !intset::is_disjoint(
-                        left.basis_of(left_dim, left_pos),
-                        right.basis_of(right_dim, right_pos),
+                        left.frame_of(left_dim, left_pos),
+                        right.frame_of(right_dim, right_pos),
                     ) {
                         continue;
                     }
@@ -165,7 +165,7 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
                         position: right_pos,
                     };
                     let dim = left_dim + right_dim;
-                    let pos = basis[dim].len();
+                    let pos = frames[dim].len();
                     let previous = cell_pairs.insert(
                         (left_cell, right_cell),
                         Cell {
@@ -174,9 +174,9 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
                         },
                     );
                     debug_assert!(previous.is_none());
-                    basis[dim].push(intset::union(
-                        left.basis_of(left_dim, left_pos),
-                        right.basis_of(right_dim, right_pos),
+                    frames[dim].push(intset::union(
+                        left.frame_of(left_dim, left_pos),
+                        right.frame_of(right_dim, right_pos),
                     ));
                     product_cells[dim].push(OrthogonalProductCell {
                         left: left_cell,
@@ -187,18 +187,18 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
         }
     }
 
-    while basis.last().is_some_and(Vec::is_empty) {
-        basis.pop();
+    while frames.last().is_some_and(Vec::is_empty) {
+        frames.pop();
         product_cells.pop();
     }
 
-    let mut faces_in: Vec<Vec<IntSet>> = basis
+    let mut faces_in: Vec<Vec<IntSet>> = frames
         .iter()
         .map(|level| vec![vec![]; level.len()])
         .collect();
     let mut faces_out = faces_in.clone();
 
-    for dim in 1..basis.len() {
+    for dim in 1..frames.len() {
         for (pos, cell) in product_cells[dim].iter().enumerate() {
             for sign in [Sign::Input, Sign::Output] {
                 let mut faces = Vec::new();
@@ -250,7 +250,7 @@ fn orthogonal_product_data(left: &FramedPoset, right: &FramedPoset) -> Orthogona
         }
     }
 
-    let product = FramedPoset::from_faces(basis, faces_in, faces_out);
+    let product = FramedPoset::from_faces(frames, faces_in, faces_out);
     debug_assert!(product.well_formed());
     OrthogonalProductData {
         shape: product,
@@ -317,17 +317,17 @@ mod tests {
         let product = orthogonal_product(&horizontal, &vertical);
 
         assert_eq!(product.sizes(), vec![4, 4, 1]);
-        assert_eq!(product.active_directions(), vec![0, 1]);
+        assert_eq!(product.total_frame(), vec![0, 1]);
         assert!(crate::isomorphism::isomorphic(&product, &square()));
     }
 
     #[test]
-    fn product_discards_pairs_with_overlapping_bases() {
+    fn product_discards_pairs_with_overlapping_frames() {
         let arrow = tight_arrow();
         let product = orthogonal_product(&arrow, &arrow);
 
         assert_eq!(product.sizes(), vec![4, 4]);
-        assert_eq!(product.active_directions(), vec![0]);
+        assert_eq!(product.total_frame(), vec![0]);
         assert_eq!(product.sizes().iter().sum::<usize>(), 8);
         assert!(product.well_formed());
     }

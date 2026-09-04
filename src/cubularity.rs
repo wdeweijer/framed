@@ -37,7 +37,7 @@ struct CheckContext {
 }
 
 fn check_all_boundary_states(shape: &Arc<FramedPoset>, cubularity_mode: CubularityMode) -> bool {
-    let directions = shape.active_directions();
+    let directions = shape.total_frame();
     let context = CheckContext {
         cubularity_mode,
         trace: std::env::var_os("OFP_CUBULARITY_TRACE").is_some(),
@@ -383,7 +383,7 @@ mod tests {
                     .map(|(position, cell)| (cell, position))
             })
             .collect();
-        let basis = levels
+        let frames = levels
             .iter()
             .map(|level| {
                 level
@@ -426,11 +426,11 @@ mod tests {
             }
         }
 
-        Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out))
+        Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out))
     }
 
     fn is_top_level_cubular(shape: &Arc<FramedPoset>) -> bool {
-        let directions = shape.active_directions();
+        let directions = shape.total_frame();
         check_last_two(
             shape,
             &directions,

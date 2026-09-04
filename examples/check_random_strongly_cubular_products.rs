@@ -102,8 +102,8 @@ fn main() -> io::Result<()> {
         let right_source = &shapes[right_index];
         let right = Arc::new(shift_by(&right_source.shape, DIRECTION_COUNT));
         debug_assert!(ofposets::intset::is_disjoint(
-            &left.shape.active_directions(),
-            &right.active_directions(),
+            &left.shape.total_frame(),
+            &right.total_frame(),
         ));
         let product = Arc::new(orthogonal_product(&left.shape, &right));
 
@@ -219,7 +219,7 @@ fn validate_record(
             format!("OFP does not have exactly {CELL_COUNT} cells"),
         ));
     }
-    if shape.active_directions() != [0, 1, 2] {
+    if shape.total_frame() != [0, 1, 2] {
         return Err(invalid_line(
             path,
             line,

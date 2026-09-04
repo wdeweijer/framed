@@ -43,9 +43,9 @@ fn n_cube(n: usize) -> FramedPoset {
     let levels: Vec<Vec<CubeCell>> = (0..=n).map(|dim| cube_cells(n, dim)).collect();
     let index = cube_index(&levels);
 
-    let basis = levels
+    let frames = levels
         .iter()
-        .map(|level| level.iter().map(|cell| cell.basis.clone()).collect())
+        .map(|level| level.iter().map(|cell| cell.frame.clone()).collect())
         .collect::<Vec<_>>();
 
     let mut faces_in = empty_adjacency(&levels);
@@ -53,19 +53,19 @@ fn n_cube(n: usize) -> FramedPoset {
 
     for dim in 1..=n {
         for (pos, cell) in levels[dim].iter().enumerate() {
-            for &direction in &cell.basis {
-                let face_basis = cell
-                    .basis
+            for &direction in &cell.frame {
+                let face_frame = cell
+                    .frame
                     .iter()
                     .copied()
-                    .filter(|&basis_direction| basis_direction != direction)
+                    .filter(|&frame_direction| frame_direction != direction)
                     .collect::<Vec<_>>();
                 let input = CubeCell {
-                    basis: face_basis.clone(),
+                    frame: face_frame.clone(),
                     fixed: cell.fixed,
                 };
                 let output = CubeCell {
-                    basis: face_basis,
+                    frame: face_frame,
                     fixed: cell.fixed | (1usize << direction),
                 };
 
@@ -78,23 +78,23 @@ fn n_cube(n: usize) -> FramedPoset {
     sort_adjacency(&mut faces_in);
     sort_adjacency(&mut faces_out);
 
-    FramedPoset::from_faces(basis, faces_in, faces_out)
+    FramedPoset::from_faces(frames, faces_in, faces_out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CubeCell {
-    basis: Vec<usize>,
+    frame: Vec<usize>,
     fixed: usize,
 }
 
 fn cube_cells(n: usize, dim: usize) -> Vec<CubeCell> {
     combinations(n, dim)
         .into_iter()
-        .flat_map(|basis| {
-            fixed_coordinate_masks(n, &basis)
+        .flat_map(|frame| {
+            fixed_coordinate_masks(n, &frame)
                 .into_iter()
                 .map(move |fixed| CubeCell {
-                    basis: basis.clone(),
+                    frame: frame.clone(),
                     fixed,
                 })
         })
@@ -151,10 +151,10 @@ fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
     out
 }
 
-fn fixed_coordinate_masks(n: usize, basis: &[usize]) -> Vec<usize> {
+fn fixed_coordinate_masks(n: usize, frame: &[usize]) -> Vec<usize> {
     (0..(1usize << n))
         .filter(|&mask| {
-            basis
+            frame
                 .iter()
                 .all(|&direction| mask & (1usize << direction) == 0)
         })

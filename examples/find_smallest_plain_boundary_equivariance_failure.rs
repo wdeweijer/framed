@@ -71,10 +71,12 @@ fn main() -> io::Result<()> {
 fn verify_smaller_shapes_are_equivariant() -> io::Result<()> {
     for cell_count in 2..4 {
         for shape in one_dimensional_shapes(cell_count) {
-            let symmetries = match shape.active_directions().len() {
+            let symmetries = match shape.total_frame().len() {
                 1 => one_dimensional_symmetries().to_vec(),
                 2 => two_dimensional_symmetries(),
-                dimension => unreachable!("enumerated shape has {dimension} active directions"),
+                dimension => {
+                    unreachable!("enumerated shape has total-frame size {dimension}")
+                }
             };
             if find_failure(0, &shape, &symmetries)?.is_some() {
                 return Err(io::Error::other(format!(
@@ -91,7 +93,7 @@ fn find_failure(
     shape: &Arc<FramedPoset>,
     symmetries: &[SignedPermutation],
 ) -> io::Result<Option<Failure>> {
-    let dimension = shape.active_directions().len();
+    let dimension = shape.total_frame().len();
     let source_boundaries: Vec<_> = [Sign::Input, Sign::Output]
         .into_iter()
         .flat_map(|sign| {
@@ -108,7 +110,7 @@ fn find_failure(
         for (source_sign, source_direction, source_boundary) in &source_boundaries {
             let image = symmetry
                 .image_of(*source_direction)
-                .expect("the symmetry covers every active direction");
+                .expect("the symmetry covers every total-frame direction");
             let target_sign = if image.reflected {
                 opposite(*source_sign)
             } else {
@@ -140,7 +142,7 @@ fn find_failure(
     Ok(None)
 }
 
-/// Enumerate the 16 signings of the unique four-cell profile with bases
+/// Enumerate the 16 signings of the unique four-cell profile with frames
 /// empty, {0}, {1}, and {0, 1}.
 fn minimal_two_dimensional_shape(code: usize) -> Arc<FramedPoset> {
     debug_assert!(code < 16);
@@ -245,7 +247,7 @@ fn enumerate_edge_faces(
     }
 }
 
-/// Direction assignments with active directions either {0} or {0, 1}.
+/// Direction assignments with total frame either {0} or {0, 1}.
 fn edge_direction_assignments(edge_count: usize) -> Vec<Vec<usize>> {
     let mut assignments = vec![vec![0; edge_count]];
     if edge_count >= 2 {

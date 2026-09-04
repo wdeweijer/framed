@@ -37,13 +37,13 @@ impl Sign {
 
 /// A finite oriented framed poset.
 ///
-/// Cells are grouped by the cardinality of their basis.  For a cell `p` at
-/// level `d`, `basis[d][p]` is a finite set of directions of cardinality `d`.
+/// Cells are grouped by the cardinality of their frame. For a cell `p` at
+/// level `d`, `frames[d][p]` is a finite set of directions of cardinality `d`.
 #[derive(Debug, Clone)]
 pub struct FramedPoset {
     pub(crate) normal: bool,
     pub(crate) dim: isize,
-    pub(crate) basis: Vec<Vec<IntSet>>,
+    pub(crate) frames: Vec<Vec<IntSet>>,
     pub(crate) faces_in: Vec<Vec<IntSet>>,
     pub(crate) faces_out: Vec<Vec<IntSet>>,
     pub(crate) cofaces_in: Vec<Vec<IntSet>>,
@@ -60,7 +60,7 @@ impl Eq for FramedPoset {}
 
 impl Hash for FramedPoset {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.basis.hash(state);
+        self.frames.hash(state);
         self.faces_in.hash(state);
         self.faces_out.hash(state);
     }
@@ -69,7 +69,8 @@ impl Hash for FramedPoset {
 #[derive(Serialize)]
 struct FramedPosetRef<'a> {
     version: usize,
-    basis: &'a [Vec<IntSet>],
+    #[serde(rename = "basis")]
+    frames: &'a [Vec<IntSet>],
     faces_in: &'a [Vec<IntSet>],
     faces_out: &'a [Vec<IntSet>],
 }
@@ -77,7 +78,8 @@ struct FramedPosetRef<'a> {
 #[derive(Deserialize)]
 struct FramedPosetData {
     version: usize,
-    basis: Vec<Vec<IntSet>>,
+    #[serde(rename = "basis")]
+    frames: Vec<Vec<IntSet>>,
     faces_in: Vec<Vec<IntSet>>,
     faces_out: Vec<Vec<IntSet>>,
 }
@@ -89,7 +91,7 @@ impl Serialize for FramedPoset {
     {
         FramedPosetRef {
             version: SERIALIZATION_VERSION,
-            basis: &self.basis,
+            frames: &self.frames,
             faces_in: &self.faces_in,
             faces_out: &self.faces_out,
         }
@@ -110,14 +112,14 @@ impl<'de> Deserialize<'de> for FramedPoset {
             )));
         }
 
-        let levels = data.basis.len();
+        let levels = data.frames.len();
         if data.faces_in.len() != levels || data.faces_out.len() != levels {
             return Err(D::Error::custom(
-                "basis and signed face tables must have the same number of levels",
+                "frame and signed face tables must have the same number of levels",
             ));
         }
 
-        let sizes: Vec<usize> = data.basis.iter().map(Vec::len).collect();
+        let sizes: Vec<usize> = data.frames.iter().map(Vec::len).collect();
         for dim in 0..levels {
             if data.faces_in[dim].len() != sizes[dim] || data.faces_out[dim].len() != sizes[dim] {
                 return Err(D::Error::custom(format!(
@@ -155,7 +157,7 @@ impl<'de> Deserialize<'de> for FramedPoset {
         let poset = Self {
             normal: false,
             dim: levels as isize - 1,
-            basis: data.basis,
+            frames: data.frames,
             faces_in: data.faces_in,
             faces_out: data.faces_out,
             cofaces_in,
@@ -169,7 +171,7 @@ impl<'de> Deserialize<'de> for FramedPoset {
 
 /// A subset of cells of a framed poset.
 ///
-/// The `keep` table is indexed by basis cardinality and then cell position,
+/// The `keep` table is indexed by frame cardinality and then cell position,
 /// matching [`FramedPoset`]'s internal tables.
 #[derive(Debug, Clone)]
 pub struct FramedPosetSubset {
@@ -232,19 +234,19 @@ impl FramedPosetSubset {
 }
 
 impl FramedPoset {
-    /// Construct a framed poset from basis and adjacency tables.
+    /// Construct a framed poset from frame and adjacency tables.
     pub fn make(
-        basis: Vec<Vec<IntSet>>,
+        frames: Vec<Vec<IntSet>>,
         faces_in: Vec<Vec<IntSet>>,
         faces_out: Vec<Vec<IntSet>>,
         cofaces_in: Vec<Vec<IntSet>>,
         cofaces_out: Vec<Vec<IntSet>>,
     ) -> Self {
-        let dim = basis.len() as isize - 1;
+        let dim = frames.len() as isize - 1;
         let poset = Self {
             normal: false,
             dim,
-            basis,
+            frames,
             faces_in,
             faces_out,
             cofaces_in,
@@ -254,21 +256,21 @@ impl FramedPoset {
         poset
     }
 
-    /// Construct a framed poset from basis and signed face tables.
+    /// Construct a framed poset from frame and signed face tables.
     ///
     /// The signed coface tables are generated as the reverse adjacency of the
     /// supplied signed face tables.
     pub fn from_faces(
-        basis: Vec<Vec<IntSet>>,
+        frames: Vec<Vec<IntSet>>,
         faces_in: Vec<Vec<IntSet>>,
         faces_out: Vec<Vec<IntSet>>,
     ) -> Self {
-        let sizes: Vec<usize> = basis.iter().map(Vec::len).collect();
+        let sizes: Vec<usize> = frames.iter().map(Vec::len).collect();
         let mut cofaces_in: Vec<Vec<IntSet>> = sizes.iter().map(|&n| vec![vec![]; n]).collect();
         let mut cofaces_out: Vec<Vec<IntSet>> = sizes.iter().map(|&n| vec![vec![]; n]).collect();
 
-        for dim in 1..basis.len() {
-            for pos in 0..basis[dim].len() {
+        for dim in 1..frames.len() {
+            for pos in 0..frames[dim].len() {
                 for &face in &faces_in[dim][pos] {
                     intset::insert(&mut cofaces_in[dim - 1][face], pos);
                 }
@@ -278,7 +280,7 @@ impl FramedPoset {
             }
         }
 
-        FramedPoset::make(basis, faces_in, faces_out, cofaces_in, cofaces_out)
+        FramedPoset::make(frames, faces_in, faces_out, cofaces_in, cofaces_out)
     }
 
     /// Empty framed poset.
@@ -286,12 +288,12 @@ impl FramedPoset {
         FramedPoset::from_faces(vec![], vec![], vec![])
     }
 
-    /// The point: one 0-cell with empty basis.
+    /// The point: one 0-cell with empty frame.
     pub fn point() -> Self {
         FramedPoset::from_faces(vec![vec![vec![]]], vec![vec![vec![]]], vec![vec![vec![]]])
     }
 
-    /// Highest basis cardinality present, or `-1` for empty.
+    /// Highest frame cardinality present, or `-1` for empty.
     pub fn dim(&self) -> isize {
         self.dim
     }
@@ -301,22 +303,22 @@ impl FramedPoset {
         self.normal
     }
 
-    /// Number of cells at each basis cardinality.
+    /// Number of cells at each frame cardinality.
     pub fn sizes(&self) -> Vec<usize> {
-        self.basis.iter().map(Vec::len).collect()
+        self.frames.iter().map(Vec::len).collect()
     }
 
-    /// Sorted directions occurring in the basis of at least one cell.
-    pub fn active_directions(&self) -> IntSet {
-        intset::collect_sorted(self.basis.iter().flatten().flatten().copied())
+    /// The sorted union of all cell frames.
+    pub fn total_frame(&self) -> IntSet {
+        intset::collect_sorted(self.frames.iter().flatten().flatten().copied())
     }
 
-    /// Whether `direction` occurs in the basis of at least one cell.
-    pub fn has_active_direction(&self, direction: usize) -> bool {
-        self.basis
+    /// Whether `direction` belongs to the total frame.
+    pub fn total_frame_contains(&self, direction: usize) -> bool {
+        self.frames
             .iter()
             .flatten()
-            .any(|basis| basis.binary_search(&direction).is_ok())
+            .any(|frame| frame.binary_search(&direction).is_ok())
     }
 
     /// Whether the undirected Hasse diagram is connected.
@@ -325,7 +327,7 @@ impl FramedPoset {
     /// The empty framed poset is not connected.
     pub fn is_connected(&self) -> bool {
         let Some((start_dim, start_pos)) = self
-            .basis
+            .frames
             .iter()
             .enumerate()
             .find_map(|(dim, level)| (!level.is_empty()).then_some((dim, 0)))
@@ -334,7 +336,7 @@ impl FramedPoset {
         };
 
         let mut seen: Vec<Vec<bool>> = self
-            .basis
+            .frames
             .iter()
             .map(|level| vec![false; level.len()])
             .collect();
@@ -354,7 +356,7 @@ impl FramedPoset {
                 }
             }
 
-            if dim + 1 < self.basis.len() {
+            if dim + 1 < self.frames.len() {
                 for &coface in self.cofaces_in[dim][pos]
                     .iter()
                     .chain(&self.cofaces_out[dim][pos])
@@ -379,7 +381,7 @@ impl FramedPoset {
 
         let shape = Arc::new(self.clone());
 
-        if !self.active_directions().into_iter().all(|direction| {
+        if !self.total_frame().into_iter().all(|direction| {
             [Sign::Input, Sign::Output].into_iter().all(|sign| {
                 let (boundary, _) = boundary(sign, direction, &shape);
                 boundary.is_rigid()
@@ -404,14 +406,14 @@ impl FramedPoset {
         true
     }
 
-    /// Basis of a cell.
-    pub fn basis_of(&self, dim: usize, pos: usize) -> &IntSet {
-        &self.basis[dim][pos]
+    /// Frame of a cell.
+    pub fn frame_of(&self, dim: usize, pos: usize) -> &IntSet {
+        &self.frames[dim][pos]
     }
 
-    /// Basis of an indexed element.
-    pub fn basis_of_element(&self, element: Element) -> &IntSet {
-        self.basis_of(element.dim, element.pos)
+    /// Frame of an indexed element.
+    pub fn frame_of_element(&self, element: Element) -> &IntSet {
+        self.frame_of(element.dim, element.pos)
     }
 
     /// Signed faces of a cell.
@@ -430,17 +432,17 @@ impl FramedPoset {
         }
     }
 
-    /// Structural equality of basis and signed face tables.
+    /// Structural equality of frame and signed face tables.
     ///
     /// The derived [`Self::is_normal`] marker is not part of the mathematical
     /// framed poset and is therefore ignored.
     pub fn equal(a: &Self, b: &Self) -> bool {
-        a.basis == b.basis && a.faces_in == b.faces_in && a.faces_out == b.faces_out
+        a.frames == b.frames && a.faces_in == b.faces_in && a.faces_out == b.faces_out
     }
 
     /// True if the cell is orthogonal to `direction`.
     pub fn is_orthogonal_to(&self, dim: usize, pos: usize, direction: usize) -> bool {
-        self.basis[dim][pos].binary_search(&direction).is_err()
+        self.frames[dim][pos].binary_search(&direction).is_err()
     }
 
     /// Cells at `dim` with no cofaces of either sign.
@@ -448,7 +450,7 @@ impl FramedPoset {
         if self.dim < 0 || dim > self.dim as usize {
             return vec![];
         }
-        (0..self.basis[dim].len())
+        (0..self.frames[dim].len())
             .filter(|&pos| {
                 self.cofaces_in[dim][pos].is_empty() && self.cofaces_out[dim][pos].is_empty()
             })
@@ -462,8 +464,8 @@ impl FramedPoset {
     pub fn greatest_element(&self) -> Option<Element> {
         let mut greatest = None;
 
-        for dim in 0..self.basis.len() {
-            for pos in 0..self.basis[dim].len() {
+        for dim in 0..self.frames.len() {
+            for pos in 0..self.frames[dim].len() {
                 if self.cofaces_in[dim][pos].is_empty() && self.cofaces_out[dim][pos].is_empty() {
                     if greatest.is_some() {
                         return None;
@@ -486,7 +488,7 @@ impl FramedPoset {
     }
 
     pub(crate) fn well_formed(&self) -> bool {
-        let levels = self.basis.len();
+        let levels = self.frames.len();
 
         if self.dim != levels as isize - 1 {
             return false;
@@ -501,7 +503,7 @@ impl FramedPoset {
         }
 
         for dim in 0..levels {
-            let n = self.basis[dim].len();
+            let n = self.frames[dim].len();
             if self.faces_in[dim].len() != n
                 || self.faces_out[dim].len() != n
                 || self.cofaces_in[dim].len() != n
@@ -510,15 +512,15 @@ impl FramedPoset {
                 return false;
             }
 
-            for basis in &self.basis[dim] {
-                if basis.len() != dim || !intset::is_sorted_unique(basis) {
+            for frame in &self.frames[dim] {
+                if frame.len() != dim || !intset::is_sorted_unique(frame) {
                     return false;
                 }
             }
         }
 
         for dim in 0..levels {
-            for pos in 0..self.basis[dim].len() {
+            for pos in 0..self.frames[dim].len() {
                 if !intset::is_sorted_unique(&self.faces_in[dim][pos])
                     || !intset::is_sorted_unique(&self.faces_out[dim][pos])
                     || !intset::is_sorted_unique(&self.cofaces_in[dim][pos])
@@ -556,15 +558,15 @@ impl FramedPoset {
                         }
                     }
 
-                    // Closedness of the basis map is equivalent, in this
+                    // Closedness of the frame map is equivalent, in this
                     // finite ranked representation, to realizing every
-                    // immediate face of this cell's basis.
-                    if self.basis[dim][pos].iter().any(|direction| {
+                    // immediate face of this cell's frame.
+                    if self.frames[dim][pos].iter().any(|direction| {
                         !self.faces_in[dim][pos]
                             .iter()
                             .chain(&self.faces_out[dim][pos])
                             .any(|&face| {
-                                self.basis[dim - 1][face].binary_search(direction).is_err()
+                                self.frames[dim - 1][face].binary_search(direction).is_err()
                             })
                     }) {
                         return false;
@@ -573,14 +575,14 @@ impl FramedPoset {
 
                 if dim + 1 < levels {
                     for &coface in &self.cofaces_in[dim][pos] {
-                        if coface >= self.basis[dim + 1].len()
+                        if coface >= self.frames[dim + 1].len()
                             || !self.faces_in[dim + 1][coface].contains(&pos)
                         {
                             return false;
                         }
                     }
                     for &coface in &self.cofaces_out[dim][pos] {
-                        if coface >= self.basis[dim + 1].len()
+                        if coface >= self.frames[dim + 1].len()
                             || !self.faces_out[dim + 1][coface].contains(&pos)
                         {
                             return false;
@@ -598,12 +600,12 @@ impl FramedPoset {
     }
 
     fn valid_face(&self, dim: usize, pos: usize, face: usize) -> bool {
-        face < self.basis[dim - 1].len()
-            && intset::is_subset(&self.basis[dim - 1][face], &self.basis[dim][pos])
+        face < self.frames[dim - 1].len()
+            && intset::is_subset(&self.frames[dim - 1][face], &self.frames[dim][pos])
     }
 }
 
-/// Increase every direction in every cell basis by one.
+/// Increase every direction in every cell frame by one.
 ///
 /// Signed cover relations and cell indices are unchanged. The result is not
 /// marked as normalized.
@@ -613,7 +615,7 @@ impl FramedPoset {
 /// Panics if a direction is already [`usize::MAX`].
 pub fn shift(shape: &FramedPoset) -> FramedPoset {
     let mut shifted = shape.clone();
-    for direction in shifted.basis.iter_mut().flatten().flatten() {
+    for direction in shifted.frames.iter_mut().flatten().flatten() {
         *direction = direction
             .checked_add(1)
             .expect("cannot shift direction usize::MAX");
@@ -636,12 +638,12 @@ pub fn boundary(
     direction: usize,
     shape: &Arc<FramedPoset>,
 ) -> (Arc<FramedPoset>, Embedding) {
-    if !shape.has_active_direction(direction) {
+    if !shape.total_frame_contains(direction) {
         return (Arc::clone(shape), Embedding::id(Arc::clone(shape)));
     }
 
     let mut keep: Vec<Vec<bool>> = shape
-        .basis
+        .frames
         .iter()
         .map(|level| vec![false; level.len()])
         .collect();
@@ -696,14 +698,15 @@ pub fn iterated_boundary(
 /// Compute the length function of an OFP known to be a polyvoxel.
 ///
 /// The result has one entry for every direction below the rank of the
-/// polyvoxel. Entries corresponding to directions outside its frame are zero.
+/// polyvoxel. Entries corresponding to directions outside its total frame are
+/// zero.
 /// This deliberately follows the structural definition by taking all input
 /// boundaries except the direction whose length is being measured, so it is
 /// substantially slower than the constructor-based cache in
 /// [`crate::polyvoxel::Polyvoxel`].
 pub fn polyvoxel_length(shape: &Arc<FramedPoset>) -> Vec<usize> {
-    let frame = shape.active_directions();
-    let Some(&max_direction) = frame.last() else {
+    let total_frame = shape.total_frame();
+    let Some(&max_direction) = total_frame.last() else {
         return vec![];
     };
     let rank = max_direction
@@ -711,8 +714,8 @@ pub fn polyvoxel_length(shape: &Arc<FramedPoset>) -> Vec<usize> {
         .expect("polyvoxel rank exceeds usize::MAX");
     let mut length = vec![0; rank];
 
-    for &direction in &frame {
-        let word: Vec<_> = frame
+    for &direction in &total_frame {
+        let word: Vec<_> = total_frame
             .iter()
             .copied()
             .filter(|&other| other != direction)
@@ -721,7 +724,7 @@ pub fn polyvoxel_length(shape: &Arc<FramedPoset>) -> Vec<usize> {
         let (spine, _) = iterated_boundary(&word, shape);
         let one_cells = spine.sizes().get(1).copied().unwrap_or(0);
         length[direction] = (0..one_cells)
-            .filter(|&pos| spine.basis_of(1, pos).as_slice() == [direction])
+            .filter(|&pos| spine.frame_of(1, pos).as_slice() == [direction])
             .count();
     }
 
@@ -816,17 +819,17 @@ fn embedding_from_closed_subset(subset: &FramedPosetSubset) -> (Arc<FramedPoset>
         }
     };
 
-    let mut basis = Vec::with_capacity(levels);
+    let mut frames = Vec::with_capacity(levels);
     let mut faces_in = Vec::with_capacity(levels);
     let mut faces_out = Vec::with_capacity(levels);
     let mut cofaces_in = Vec::with_capacity(levels);
     let mut cofaces_out = Vec::with_capacity(levels);
 
     for (dim, old_positions) in map.iter().enumerate() {
-        basis.push(
+        frames.push(
             old_positions
                 .iter()
-                .map(|&old| shape.basis[dim][old].clone())
+                .map(|&old| shape.frames[dim][old].clone())
                 .collect(),
         );
         faces_in.push(
@@ -856,7 +859,7 @@ fn embedding_from_closed_subset(subset: &FramedPosetSubset) -> (Arc<FramedPoset>
     }
 
     let sub = Arc::new(FramedPoset::make(
-        basis,
+        frames,
         faces_in,
         faces_out,
         cofaces_in,
@@ -932,35 +935,35 @@ mod tests {
         let empty = FramedPoset::empty();
         assert_eq!(empty.dim(), -1);
         assert_eq!(empty.sizes(), Vec::<usize>::new());
-        assert!(empty.active_directions().is_empty());
+        assert!(empty.total_frame().is_empty());
         assert!(!empty.is_normal());
 
         let point = FramedPoset::point();
         assert_eq!(point.dim(), 0);
         assert_eq!(point.sizes(), vec![1]);
-        assert_eq!(point.basis_of(0, 0), &Vec::<usize>::new());
-        assert!(point.active_directions().is_empty());
+        assert_eq!(point.frame_of(0, 0), &Vec::<usize>::new());
+        assert!(point.total_frame().is_empty());
         assert!(!point.is_normal());
     }
 
     #[test]
-    fn active_directions_are_sorted_and_deduplicated() {
+    fn total_frame_is_sorted_and_deduplicated() {
         let square = square();
-        assert_eq!(square.active_directions(), vec![0, 1]);
-        assert!(square.has_active_direction(0));
-        assert!(square.has_active_direction(1));
-        assert!(!square.has_active_direction(2));
+        assert_eq!(square.total_frame(), vec![0, 1]);
+        assert!(square.total_frame_contains(0));
+        assert!(square.total_frame_contains(1));
+        assert!(!square.total_frame_contains(2));
     }
 
     #[test]
-    fn shift_increments_bases_and_preserves_signed_adjacency() {
+    fn shift_increments_frames_and_preserves_signed_adjacency() {
         let original = square();
         let shifted = shift(&original);
 
-        assert_eq!(shifted.active_directions(), vec![1, 2]);
-        assert_eq!(shifted.basis_of(1, 0), &vec![1]);
-        assert_eq!(shifted.basis_of(1, 2), &vec![2]);
-        assert_eq!(shifted.basis_of(2, 0), &vec![1, 2]);
+        assert_eq!(shifted.total_frame(), vec![1, 2]);
+        assert_eq!(shifted.frame_of(1, 0), &vec![1]);
+        assert_eq!(shifted.frame_of(1, 2), &vec![2]);
+        assert_eq!(shifted.frame_of(2, 0), &vec![1, 2]);
         assert_eq!(shifted.faces_in, original.faces_in);
         assert_eq!(shifted.faces_out, original.faces_out);
         assert_eq!(shifted.cofaces_in, original.cofaces_in);
@@ -1105,6 +1108,8 @@ mod tests {
             restored.cofaces_of(Sign::Input, 1, 0)
         );
         assert!(json.contains("\"version\": 1"));
+        assert!(json.contains("\"basis\""));
+        assert!(!json.contains("\"frames\""));
         assert!(!json.contains("cofaces"));
         assert!(!json.contains("normal"));
         assert!(!restored.is_normal());
@@ -1212,7 +1217,7 @@ mod tests {
         let poset = FramedPoset {
             normal: false,
             dim: 1,
-            basis: vec![vec![vec![]], vec![vec![0]]],
+            frames: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![0]]],
             faces_out: vec![vec![vec![]], vec![vec![0]]],
             cofaces_in: vec![vec![vec![0]], vec![vec![]]],
@@ -1227,7 +1232,7 @@ mod tests {
         let poset = FramedPoset {
             normal: false,
             dim: 1,
-            basis: vec![vec![vec![]], vec![vec![0]]],
+            frames: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![]]],
             faces_out: vec![vec![vec![]], vec![vec![]]],
             cofaces_in: vec![vec![vec![]], vec![vec![]]],
@@ -1238,11 +1243,11 @@ mod tests {
     }
 
     #[test]
-    fn well_formed_rejects_non_closed_basis_map() {
+    fn well_formed_rejects_non_closed_frame_map() {
         let poset = FramedPoset {
             normal: false,
             dim: 2,
-            basis: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
+            frames: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
             faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0]]],
             faces_out: vec![vec![vec![]], vec![vec![], vec![]], vec![vec![]]],
             cofaces_in: vec![vec![vec![0, 1]], vec![vec![0], vec![]], vec![vec![]]],
@@ -1253,11 +1258,11 @@ mod tests {
     }
 
     #[test]
-    fn well_formed_accepts_one_sided_faces_over_every_basis_face() {
+    fn well_formed_accepts_one_sided_faces_over_every_frame_face() {
         let poset = FramedPoset {
             normal: false,
             dim: 2,
-            basis: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
+            frames: vec![vec![vec![]], vec![vec![0], vec![1]], vec![vec![0, 1]]],
             faces_in: vec![vec![vec![]], vec![vec![0], vec![0]], vec![vec![0, 1]]],
             faces_out: vec![vec![vec![]], vec![vec![], vec![]], vec![vec![]]],
             cofaces_in: vec![vec![vec![0, 1]], vec![vec![0], vec![0]], vec![vec![]]],
@@ -1272,7 +1277,7 @@ mod tests {
         let poset = FramedPoset {
             normal: false,
             dim: 1,
-            basis: vec![vec![vec![]], vec![vec![0]]],
+            frames: vec![vec![vec![]], vec![vec![0]]],
             faces_in: vec![vec![vec![]], vec![vec![0, 0]]],
             faces_out: vec![vec![vec![]], vec![vec![]]],
             cofaces_in: vec![vec![vec![0]], vec![vec![]]],
@@ -1296,7 +1301,7 @@ mod tests {
     }
 
     #[test]
-    fn boundary_in_an_inactive_direction_is_the_shared_identity() {
+    fn boundary_outside_the_total_frame_is_the_shared_identity() {
         let mut arrow = (*tight_arrow()).clone();
         arrow.normal = true;
         let arrow = Arc::new(arrow);
@@ -1329,7 +1334,7 @@ mod tests {
         let square = square();
 
         let (left, _) = boundary(Sign::Input, 0, &square);
-        assert_eq!(left.basis_of(1, 0), &vec![1]);
+        assert_eq!(left.frame_of(1, 0), &vec![1]);
         assert_eq!(left.faces_of(Sign::Input, 1, 0), &vec![0]);
         assert_eq!(left.faces_of(Sign::Output, 1, 0), &vec![1]);
     }

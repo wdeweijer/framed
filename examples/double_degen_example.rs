@@ -1,5 +1,5 @@
-use ofposets::{Renderer, to_dot};
 use ofposets::polyvoxel::*;
+use ofposets::{Renderer, to_dot};
 use std::{fs, io};
 
 fn main() -> io::Result<()> {
@@ -28,13 +28,13 @@ fn main() -> io::Result<()> {
     let witness = v2.greatest_element().expect("v2 must be a voxel");
     let witness = v2_into_v.apply(witness);
     let witness = v_into_w.apply(witness);
-    let witness_basis = w.basis_of_element(witness);
+    let witness_frame = w.frame_of_element(witness);
     assert!(w.maximal(witness.dim).contains(&witness.pos));
-    assert!(witness_basis.len() + 1 < w.active_directions().len());
+    assert!(witness_frame.len() + 1 < w.total_frame().len());
 
     println!("{}", serde_json::to_string(w.as_ref())?);
-    println!("{:?}", witness_basis);
-    println!("{:?}", w.active_directions());
+    println!("{:?}", witness_frame);
+    println!("{:?}", w.total_frame());
     // fs::write("visualizations/double_degen_example.dot", to_dot(&w, Renderer::CompassSpring))?;
 
     Ok(())

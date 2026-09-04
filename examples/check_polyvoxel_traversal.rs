@@ -39,7 +39,7 @@ fn main() -> io::Result<()> {
         eprintln!("timing results include debug-only validation; use --release for comparison");
     }
     println!(
-        "enumerating polyvoxels with at most {MAX_CELLS} cells and active directions contained in {ALLOWED_DIRECTIONS:?}"
+        "enumerating polyvoxels with at most {MAX_CELLS} cells and total frame contained in {ALLOWED_DIRECTIONS:?}"
     );
     let enumeration_started = Instant::now();
     let catalog = enumerate_polyvoxels_with_progress(MAX_CELLS, ALLOWED_DIRECTIONS, |progress| {

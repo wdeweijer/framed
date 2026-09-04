@@ -167,7 +167,8 @@ struct CatalogRecord<'a> {
     version: usize,
     id: usize,
     cells: usize,
-    active_directions: Vec<usize>,
+    #[serde(rename = "active_directions")]
+    total_frame: Vec<usize>,
     length: &'a [usize],
     layering_direction: Option<usize>,
     is_voxel: bool,
@@ -215,7 +216,7 @@ fn main() -> io::Result<()> {
     }
     let pool = pool_builder.build().map_err(io::Error::other)?;
     println!(
-        "enumerating polyvoxels with at most {} cells, active directions from 0 through {}, {}, using {} threads",
+        "enumerating polyvoxels with at most {} cells, total-frame directions from 0 through {}, {}, using {} threads",
         config.max_cells,
         config.max_direction,
         length_description,
@@ -382,7 +383,7 @@ fn write_catalog(output_file: &Path, catalog: &PolyvoxelCatalog) -> io::Result<(
                     version: 1,
                     id,
                     cells: entry.shape.sizes().iter().sum(),
-                    active_directions: entry.shape.active_directions(),
+                    total_frame: entry.shape.total_frame(),
                     length: entry.shape.length(),
                     layering_direction: entry.shape.layering_direction(),
                     is_voxel: entry.is_voxel,

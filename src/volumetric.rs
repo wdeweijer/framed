@@ -2,9 +2,9 @@
 //!
 //! Volumetricity includes strong cubularity, so the order of distinct
 //! boundary operations does not affect a volumetric candidate. We consistently
-//! apply them in ascending frame order; the standalone predicates use the same
+//! apply them in ascending total-frame order; the standalone predicates use the same
 //! deterministic convention even for non-cubular inputs. Following Remark
-//! 1.71, we use the exact active frame, since adding absent directions would
+//! 1.71, we use the exact total frame, since adding absent directions would
 //! only insert identity boundary operations.
 
 use std::sync::Arc;
@@ -16,13 +16,13 @@ use crate::poset::{FramedPoset, Sign, boundary, iterated_boundary};
 
 /// Check every convolution equation from Definition 1.69.
 pub fn satisfies_convolution_equations(shape: &Arc<FramedPoset>) -> bool {
-    let frame = shape.active_directions();
+    let total_frame = shape.total_frame();
 
-    frame.iter().enumerate().all(|(index, &direction)| {
+    total_frame.iter().enumerate().all(|(index, &direction)| {
         [Sign::Input, Sign::Output].into_iter().all(|sign| {
             let (direct_boundary, _) = boundary(sign, direction, shape);
-            let left = boundary_block(sign, &frame[..=index], shape);
-            let right = boundary_block(sign, &frame[index..], shape);
+            let left = boundary_block(sign, &total_frame[..=index], shape);
+            let right = boundary_block(sign, &total_frame[index..], shape);
             let convolution = orthogonal_product(&left, &right);
 
             isomorphic(&direct_boundary, &convolution)
@@ -32,15 +32,15 @@ pub fn satisfies_convolution_equations(shape: &Arc<FramedPoset>) -> bool {
 
 /// Check every left sign-equation from Definition 1.69.
 pub fn satisfies_left_sign_equations(shape: &Arc<FramedPoset>) -> bool {
-    let frame = shape.active_directions();
+    let total_frame = shape.total_frame();
 
-    index_pairs(frame.len()).all(|(left, right)| {
+    index_pairs(total_frame.len()).all(|(left, right)| {
         [Sign::Input, Sign::Output].into_iter().all(|sign| {
-            let mut lhs_word = boundary_word(sign.opposite(), &frame[..=left]);
-            lhs_word.extend(boundary_word(sign, &frame[left + 1..=right]));
+            let mut lhs_word = boundary_word(sign.opposite(), &total_frame[..=left]);
+            lhs_word.extend(boundary_word(sign, &total_frame[left + 1..=right]));
             let (lhs, _) = iterated_boundary(&lhs_word, shape);
 
-            let rhs_word = boundary_word(sign, &frame[..=right]);
+            let rhs_word = boundary_word(sign, &total_frame[..=right]);
             let (rhs, _) = iterated_boundary(&rhs_word, shape);
 
             isomorphic(&lhs, &rhs)
@@ -50,15 +50,15 @@ pub fn satisfies_left_sign_equations(shape: &Arc<FramedPoset>) -> bool {
 
 /// Check every right sign-equation from Definition 1.69.
 pub fn satisfies_right_sign_equations(shape: &Arc<FramedPoset>) -> bool {
-    let frame = shape.active_directions();
+    let total_frame = shape.total_frame();
 
-    index_pairs(frame.len()).all(|(left, right)| {
+    index_pairs(total_frame.len()).all(|(left, right)| {
         [Sign::Input, Sign::Output].into_iter().all(|sign| {
-            let mut lhs_word = boundary_word(sign, &frame[left..right]);
-            lhs_word.extend(boundary_word(sign.opposite(), &frame[right..]));
+            let mut lhs_word = boundary_word(sign, &total_frame[left..right]);
+            lhs_word.extend(boundary_word(sign.opposite(), &total_frame[right..]));
             let (lhs, _) = iterated_boundary(&lhs_word, shape);
 
-            let rhs_word = boundary_word(sign, &frame[left..]);
+            let rhs_word = boundary_word(sign, &total_frame[left..]);
             let (rhs, _) = iterated_boundary(&rhs_word, shape);
 
             isomorphic(&lhs, &rhs)

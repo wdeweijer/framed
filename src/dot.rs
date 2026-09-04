@@ -14,7 +14,7 @@ use crate::poset::{FramedPoset, Sign};
 /// DOT layout strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Renderer {
-    /// Let Graphviz rank cells by basis cardinality.
+    /// Let Graphviz rank cells by frame cardinality.
     Ranked,
     /// Use the compass-directed spring simulation to pin exact node positions.
     CompassSpring,
@@ -60,7 +60,7 @@ pub fn compass_spring_debug_json(shape: &FramedPoset) -> String {
                 id: nodes.len(),
                 cell_dimension: dim,
                 cell_position: pos,
-                basis: shape.basis_of(dim, pos).clone(),
+                frame: shape.frame_of(dim, pos).clone(),
                 label: node_label(shape, dim, pos),
             });
         }
@@ -105,7 +105,8 @@ struct SpringDebugNode {
     id: usize,
     cell_dimension: usize,
     cell_position: usize,
-    basis: Vec<usize>,
+    #[serde(rename = "basis")]
+    frame: Vec<usize>,
     label: String,
 }
 
@@ -426,7 +427,7 @@ fn compass_spring_graph(shape: &FramedPoset) -> SpringGraph {
         for (pos, node) in level.iter_mut().enumerate() {
             *node = node_count;
             node_count += 1;
-            for &axis in shape.basis_of(dim, pos) {
+            for &axis in shape.frame_of(dim, pos) {
                 max_axis = Some(max_axis.map_or(axis, |current| current.max(axis)));
             }
         }
@@ -477,8 +478,8 @@ fn compass_spring_edge(
     cell_pos: usize,
 ) -> SpringEdge {
     let axis = added_axis(
-        shape.basis_of(face_dim, face_pos),
-        shape.basis_of(cell_dim, cell_pos),
+        shape.frame_of(face_dim, face_pos),
+        shape.frame_of(cell_dim, cell_pos),
     );
     let positive = sign == Sign::Input;
 
@@ -487,17 +488,17 @@ fn compass_spring_edge(
         head: node_of_cell[cell_dim][cell_pos],
         tail_port: Some(AxisPort::new(axis, positive)),
         head_port: Some(AxisPort::new(axis, !positive)),
-        one_dimensional: shape.basis_of(face_dim, face_pos).is_empty()
-            && shape.basis_of(cell_dim, cell_pos).len() == 1,
+        one_dimensional: shape.frame_of(face_dim, face_pos).is_empty()
+            && shape.frame_of(cell_dim, cell_pos).len() == 1,
     }
 }
 
-fn added_axis(face_basis: &[usize], cell_basis: &[usize]) -> usize {
-    cell_basis
+fn added_axis(face_frame: &[usize], cell_frame: &[usize]) -> usize {
+    cell_frame
         .iter()
         .copied()
-        .find(|axis| face_basis.binary_search(axis).is_err())
-        .expect("a cover relation must add one basis direction")
+        .find(|axis| face_frame.binary_search(axis).is_err())
+        .expect("a cover relation must add one frame direction")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -524,16 +525,16 @@ fn node_label(shape: &FramedPoset, dim: usize, pos: usize) -> String {
         "({}, {})\n{}",
         dim,
         pos,
-        basis_label(shape.basis_of(dim, pos))
+        frame_label(shape.frame_of(dim, pos))
     )
 }
 
-fn basis_label(basis: &[usize]) -> String {
-    if basis.is_empty() {
+fn frame_label(frame: &[usize]) -> String {
+    if frame.is_empty() {
         return "{}".to_owned();
     }
 
-    let body = basis
+    let body = frame
         .iter()
         .map(usize::to_string)
         .collect::<Vec<_>>()

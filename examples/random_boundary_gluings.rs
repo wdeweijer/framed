@@ -755,7 +755,7 @@ fn validate_dataset_shape(shape: &FramedPoset, path: &Path, line: usize) -> io::
     for (dim, size) in sizes.into_iter().enumerate() {
         for pos in 0..size {
             if shape
-                .basis_of(dim, pos)
+                .frame_of(dim, pos)
                 .iter()
                 .any(|&direction| direction > 1)
             {

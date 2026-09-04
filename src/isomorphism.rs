@@ -80,16 +80,16 @@ fn recompute_normalisation(shape: &FramedPoset) -> (FramedPoset, Vec<Vec<usize>>
         old_to_new.push(inverse);
     }
 
-    let mut basis = Vec::with_capacity(sizes.len());
+    let mut frames = Vec::with_capacity(sizes.len());
     let mut faces_in = Vec::with_capacity(sizes.len());
     let mut faces_out = Vec::with_capacity(sizes.len());
     for dim in 0..sizes.len() {
-        let mut basis_level = Vec::with_capacity(sizes[dim]);
+        let mut frame_level = Vec::with_capacity(sizes[dim]);
         let mut faces_in_level = Vec::with_capacity(sizes[dim]);
         let mut faces_out_level = Vec::with_capacity(sizes[dim]);
 
         for &old_pos in &new_to_old[dim] {
-            basis_level.push(shape.basis_of(dim, old_pos).clone());
+            frame_level.push(shape.frame_of(dim, old_pos).clone());
             if dim == 0 {
                 faces_in_level.push(vec![]);
                 faces_out_level.push(vec![]);
@@ -109,12 +109,12 @@ fn recompute_normalisation(shape: &FramedPoset) -> (FramedPoset, Vec<Vec<usize>>
             }
         }
 
-        basis.push(basis_level);
+        frames.push(frame_level);
         faces_in.push(faces_in_level);
         faces_out.push(faces_out_level);
     }
 
-    let mut normalized = FramedPoset::from_faces(basis, faces_in, faces_out);
+    let mut normalized = FramedPoset::from_faces(frames, faces_in, faces_out);
     normalized.normal = true;
     debug_assert!(vf2_isomorphic(shape, &normalized));
     (normalized, new_to_old)
@@ -130,7 +130,7 @@ pub fn isomorphic(a: &FramedPoset, b: &FramedPoset) -> bool {
 }
 
 fn vf2_isomorphic(a: &FramedPoset, b: &FramedPoset) -> bool {
-    let palette = basis_palette(a, b);
+    let palette = frame_palette(a, b);
     let a_graph = ColoredHasseGraph::new(a, &palette);
     let b_graph = ColoredHasseGraph::new(b, &palette);
 
@@ -151,7 +151,7 @@ fn vf2_isomorphic(a: &FramedPoset, b: &FramedPoset) -> bool {
 /// The result can be extremely large: a framed poset consisting of `n`
 /// indistinguishable isolated points has `n!` automorphisms.
 pub fn isomorphisms(dom: &Arc<FramedPoset>, cod: &Arc<FramedPoset>) -> Vec<Embedding> {
-    let palette = basis_palette(dom, cod);
+    let palette = frame_palette(dom, cod);
     let dom_graph = ColoredHasseGraph::new(dom, &palette);
     let cod_graph = ColoredHasseGraph::new(cod, &palette);
 
@@ -189,9 +189,9 @@ impl ColoredHasseGraph {
             .iter()
             .map(|&(dim, pos)| {
                 let color = palette
-                    .binary_search(shape.basis_of(dim, pos))
-                    .expect("every cell basis must occur in the shared palette");
-                u32::try_from(color).expect("too many distinct bases for rust-igraph colors")
+                    .binary_search(shape.frame_of(dim, pos))
+                    .expect("every cell frame must occur in the shared palette");
+                u32::try_from(color).expect("too many distinct frames for rust-igraph colors")
             })
             .collect();
 
@@ -242,7 +242,7 @@ impl CanonicalGraph {
             .enumerate()
             .flat_map(|(dim, &size)| {
                 (0..size)
-                    .map(move |pos| CanonicalVertexLabel::Cell(shape.basis_of(dim, pos).clone()))
+                    .map(move |pos| CanonicalVertexLabel::Cell(shape.frame_of(dim, pos).clone()))
             })
             .collect();
         let cell_count = labels.len();
@@ -310,12 +310,12 @@ impl CanonicalGraph {
     }
 }
 
-fn basis_palette(a: &FramedPoset, b: &FramedPoset) -> Vec<IntSet> {
+fn frame_palette(a: &FramedPoset, b: &FramedPoset) -> Vec<IntSet> {
     let mut palette = Vec::new();
     for shape in [a, b] {
         for (dim, size) in shape.sizes().into_iter().enumerate() {
             for pos in 0..size {
-                palette.push(shape.basis_of(dim, pos).clone());
+                palette.push(shape.frame_of(dim, pos).clone());
             }
         }
     }
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn basis_is_preserved() {
+    fn frame_is_preserved() {
         let direction_0 = half_arrow(Sign::Input, 0);
         let direction_1 = half_arrow(Sign::Input, 1);
 

@@ -18,7 +18,7 @@ const DEFAULT_CELL_COUNT: usize = 9;
 const DEFAULT_FRAME_DIMENSION: usize = 3;
 const REPORT_EVERY: u64 = 1_000_000;
 const WORKER_COUNT: usize = 24;
-const OUTPUT_DIR: &str = "visualizations/random_frame_dimension_counterexamples";
+const OUTPUT_DIR: &str = "visualizations/random_total_frame_size_counterexamples";
 
 #[derive(Debug, Default)]
 struct Statistics {
@@ -42,8 +42,9 @@ struct Witness {
 }
 
 fn main() -> io::Result<()> {
-    let (sample_count, cell_count, frame_dimension, seed) = arguments()?;
-    let generator = RandomFramedPosetGenerator::new_without_full_basis(frame_dimension, cell_count);
+    let (sample_count, cell_count, total_frame_size, seed) = arguments()?;
+    let generator =
+        RandomFramedPosetGenerator::new_without_full_frame(total_frame_size, cell_count);
     let statistics = Statistics::default();
     let first_connected = Mutex::new(None);
     let first_rigid = Mutex::new(None);
@@ -54,10 +55,10 @@ fn main() -> io::Result<()> {
         .map_err(io::Error::other)?;
 
     println!(
-        "checking {sample_count} random {cell_count}-cell OFPs with frame directions {:?}, \
+        "checking {sample_count} random {cell_count}-cell OFPs with total frame {:?}, \
          dimension {}, and no full-frame cells on {WORKER_COUNT} threads (seed {seed:#018x})",
-        (0..frame_dimension).collect::<Vec<_>>(),
-        frame_dimension - 1,
+        (0..total_frame_size).collect::<Vec<_>>(),
+        total_frame_size - 1,
     );
 
     pool.install(|| {
@@ -65,10 +66,10 @@ fn main() -> io::Result<()> {
             let mut rng = SmallRng::seed_from_u64(seed.wrapping_add(sample));
             let shape = Arc::new(generator.generate(&mut rng));
             debug_assert_eq!(
-                shape.active_directions(),
-                (0..frame_dimension).collect::<Vec<_>>()
+                shape.total_frame(),
+                (0..total_frame_size).collect::<Vec<_>>()
             );
-            debug_assert_eq!(shape.dim(), frame_dimension as isize - 1);
+            debug_assert_eq!(shape.dim(), total_frame_size as isize - 1);
 
             if is_cubular(CubularityMode::Strong, &shape) {
                 statistics.strongly_cubular.fetch_add(1, Ordering::Relaxed);
@@ -102,10 +103,15 @@ fn main() -> io::Result<()> {
         .expect("rigid-witness mutex was poisoned");
 
     if let Some(witness) = &first_connected {
-        write_witness("connected", frame_dimension, witness.sample, &witness.shape)?;
+        write_witness(
+            "connected",
+            total_frame_size,
+            witness.sample,
+            &witness.shape,
+        )?;
     }
     if let Some(witness) = &first_rigid {
-        write_witness("rigid", frame_dimension, witness.sample, &witness.shape)?;
+        write_witness("rigid", total_frame_size, witness.sample, &witness.shape)?;
     }
 
     println!("generated: {}", statistics.generated);
@@ -121,12 +127,12 @@ fn main() -> io::Result<()> {
 
     match &first_connected {
         Some(witness) => println!(
-            "connectedness does not imply the frame/dimension thesis; first witness was sample \
+            "connectedness does not imply the total-frame/dimension thesis; first witness was sample \
              {}",
             witness.sample
         ),
         None => println!(
-            "no connected strongly cubular counterexample to the frame/dimension thesis was found"
+            "no connected strongly cubular counterexample to the total-frame/dimension thesis was found"
         ),
     }
     if first_connected.is_some() {
@@ -179,13 +185,13 @@ fn report_progress(completed: u64, sample_count: u64, started: Instant) {
 
 fn write_witness(
     kind: &str,
-    frame_dimension: usize,
+    total_frame_size: usize,
     sample: u64,
     shape: &FramedPoset,
 ) -> io::Result<PathBuf> {
     let output_dir = Path::new(OUTPUT_DIR);
     fs::create_dir_all(output_dir)?;
-    let stem = format!("frame_{frame_dimension}_first_{kind}_sample_{sample}");
+    let stem = format!("frame_{total_frame_size}_first_{kind}_sample_{sample}");
 
     fs::write(
         output_dir.join(format!("{stem}.ofp.json")),
@@ -218,9 +224,9 @@ fn arguments() -> io::Result<(u64, usize, usize, u64)> {
         .map(|value| parse_usize("cell count", &value))
         .transpose()?
         .unwrap_or(DEFAULT_CELL_COUNT);
-    let frame_dimension = arguments
+    let total_frame_size = arguments
         .next()
-        .map(|value| parse_usize("frame dimension", &value))
+        .map(|value| parse_usize("total frame size", &value))
         .transpose()?
         .unwrap_or(DEFAULT_FRAME_DIMENSION);
     let seed = arguments
@@ -231,28 +237,28 @@ fn arguments() -> io::Result<(u64, usize, usize, u64)> {
 
     if arguments.next().is_some() {
         return Err(invalid_input(
-            "usage: check_random_frame_dimension [sample-count] [cell-count] \
-             [frame-dimension] [seed]",
+            "usage: check_random_total_frame_size [sample-count] [cell-count] \
+             [total-frame-size] [seed]",
         ));
     }
     if sample_count == 0 {
         return Err(invalid_input("sample count must be positive"));
     }
-    if !(2..usize::BITS as usize).contains(&frame_dimension) {
+    if !(2..usize::BITS as usize).contains(&total_frame_size) {
         return Err(invalid_input(
-            "frame dimension must be at least 2 and smaller than the number of bits in usize",
+            "total frame size must be at least 2 and smaller than the number of bits in usize",
         ));
     }
-    let minimum_cell_count = (1usize << (frame_dimension - 1)) + 1;
+    let minimum_cell_count = (1usize << (total_frame_size - 1)) + 1;
     if cell_count < minimum_cell_count {
         return Err(invalid_input(format!(
-            "cell count must be at least {minimum_cell_count} for frame dimension \
-             {frame_dimension} and OFP dimension {}",
-            frame_dimension - 1
+            "cell count must be at least {minimum_cell_count} for total frame size \
+             {total_frame_size} and OFP dimension {}",
+            total_frame_size - 1
         )));
     }
 
-    Ok((sample_count, cell_count, frame_dimension, seed))
+    Ok((sample_count, cell_count, total_frame_size, seed))
 }
 
 fn parse_u64(name: &str, value: &str) -> io::Result<u64> {

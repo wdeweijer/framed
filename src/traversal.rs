@@ -2,9 +2,9 @@
 //!
 //! This is an experimental adaptation of the traversal of directed molecules.
 //! A polyvoxel has one input and one output boundary for every direction in
-//! its frame, so those boundaries are visited in increasing direction order.
-//! If the polyvoxel is not a voxel, its full-frame maximal cells are then
-//! reached in the greatest frame direction from the earliest already visited
+//! its total frame, so those boundaries are visited in increasing direction
+//! order. If the polyvoxel is not a voxel, its full-frame maximal cells are
+//! then reached in the greatest total-frame direction from the earliest visited
 //! input face. No existing cell index is used to break a tie: a failure of
 //! existence or uniqueness is reported as a [`TraversalError`].
 
@@ -20,7 +20,7 @@ use crate::poset::{Element, FramedPoset, FramedPosetSubset, Sign, boundary, clos
 /// A failed invariant of the proposed polyvoxel traversal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TraversalError {
-    /// Taking an active directional boundary failed to reduce the shape.
+    /// Taking a boundary in a total-frame direction failed to reduce the shape.
     BoundaryDidNotDecrease {
         sign: Sign,
         direction: usize,
@@ -96,7 +96,7 @@ pub fn traversal_order(polyvoxel: &Polyvoxel) -> Result<Vec<Element>, TraversalE
 
 /// Relabel a polyvoxel by its intrinsic traversal.
 ///
-/// Cells at each basis cardinality retain their relative traversal order. The
+/// Cells at each frame cardinality retain their relative traversal order. The
 /// returned embedding is an isomorphism from the relabelled shape to the
 /// original shape. The relabelled OFP is deliberately not marked as the
 /// graph-isomorphism normal form used by [`crate::isomorphism::normalize`].
@@ -132,14 +132,14 @@ pub fn traversal_normalisation_of_shape(
         }
     }
 
-    let mut basis = Vec::with_capacity(sizes.len());
+    let mut frames = Vec::with_capacity(sizes.len());
     let mut faces_in = Vec::with_capacity(sizes.len());
     let mut faces_out = Vec::with_capacity(sizes.len());
     for (dim, level) in new_to_old.iter().enumerate() {
-        basis.push(
+        frames.push(
             level
                 .iter()
-                .map(|&old_pos| shape.basis_of(dim, old_pos).clone())
+                .map(|&old_pos| shape.frame_of(dim, old_pos).clone())
                 .collect(),
         );
         if dim == 0 {
@@ -175,7 +175,7 @@ pub fn traversal_normalisation_of_shape(
         );
     }
 
-    let normal = Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out));
+    let normal = Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out));
     let into_original = Embedding::from_map(Arc::clone(&normal), Arc::clone(shape), new_to_old);
     debug_assert!(into_original.is_isomorphism());
     Ok((normal, into_original))
@@ -187,20 +187,20 @@ fn traverse_shape(shape: &Arc<FramedPoset>) -> Result<Vec<Element>, TraversalErr
         return Ok(vec![]);
     }
 
-    let frame = shape.active_directions();
+    let total_frame = shape.total_frame();
     let mut traversal = PartialTraversal::new(shape);
 
-    for &direction in &frame {
+    for &direction in &total_frame {
         traversal.append_boundary(Sign::Input, direction, total_cells)?;
     }
 
     if let Some(greatest) = shape.greatest_element() {
         traversal.append(greatest);
-    } else if let Some(&direction) = frame.last() {
-        traversal.walk_maximal_cells(&frame, direction, total_cells)?;
+    } else if let Some(&direction) = total_frame.last() {
+        traversal.walk_maximal_cells(&total_frame, direction, total_cells)?;
     }
 
-    for &direction in &frame {
+    for &direction in &total_frame {
         traversal.append_boundary(Sign::Output, direction, total_cells)?;
     }
 
@@ -265,18 +265,18 @@ impl<'a> PartialTraversal<'a> {
 
     fn walk_maximal_cells(
         &mut self,
-        frame: &[usize],
+        total_frame: &[usize],
         direction: usize,
         parent_cells: usize,
     ) -> Result<(), TraversalError> {
-        let full_dim = frame.len();
+        let full_dim = total_frame.len();
         let full_maxima: Vec<Element> = self
             .shape
             .sizes()
             .get(full_dim)
             .map(|&size| {
                 (0..size)
-                    .filter(|&pos| self.shape.basis_of(full_dim, pos) == frame)
+                    .filter(|&pos| self.shape.frame_of(full_dim, pos) == total_frame)
                     .map(|pos| Element { dim: full_dim, pos })
                     .collect()
             })
@@ -356,8 +356,8 @@ impl<'a> PartialTraversal<'a> {
                 full_maxima.contains(cell)
                     && !self.seen[cell.dim][cell.pos]
                     && intset::cover_direction(
-                        self.shape.basis_of_element(face),
-                        self.shape.basis_of_element(*cell),
+                        self.shape.frame_of_element(face),
+                        self.shape.frame_of_element(*cell),
                     ) == Ok(direction)
             })
             .collect()
@@ -484,7 +484,7 @@ mod tests {
         assert_eq!(normal.sizes(), vec![4, 4, 1]);
         assert_eq!(
             (0..4)
-                .map(|pos| normal.basis_of(1, pos).clone())
+                .map(|pos| normal.frame_of(1, pos).clone())
                 .collect::<Vec<_>>(),
             vec![vec![1], vec![0], vec![1], vec![0]],
         );

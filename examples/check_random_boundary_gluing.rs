@@ -572,7 +572,7 @@ fn axial_boundary_intersection_dimension(
     debug_assert!(output_boundary.is_closed());
     let intersection = Embedding::intersection(&input_boundary, output_boundary).into_codomain;
 
-    (!intersection.is_empty()).then(|| intersection.dom.active_directions().len())
+    (!intersection.is_empty()).then(|| intersection.dom.total_frame().len())
 }
 
 fn check_formulas(
@@ -729,7 +729,7 @@ fn print_statistics(
     );
     for (&dimension, &count) in &statistics.axial_boundary_intersection_dimensions {
         println!(
-            "  nonempty intersection with {dimension} active directions: {count} ({:.4}% of \
+            "  nonempty intersection with total-frame size {dimension}: {count} ({:.4}% of \
              nonempty intersections)",
             percentage(count, statistics.nonempty_axial_boundary_intersections)
         );
@@ -1009,7 +1009,7 @@ mod tests {
                     .map(|(position, cell)| (cell, position))
             })
             .collect();
-        let basis = levels
+        let frames = levels
             .iter()
             .map(|level| {
                 level
@@ -1052,6 +1052,6 @@ mod tests {
             }
         }
 
-        Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out))
+        Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out))
     }
 }

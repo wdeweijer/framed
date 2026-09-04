@@ -49,41 +49,41 @@ impl<T> IndexMut<Sign> for SignedPair<T> {
     }
 }
 
-/// Signed box faces indexed by position in a sorted frame.
+/// Signed box faces indexed by position in a sorted total frame.
 #[derive(Debug, Clone)]
 pub struct BoxFaces {
-    pub frame: IntSet,
+    pub total_frame: IntSet,
     pub by_direction: Vec<SignedPair<Arc<FramedPoset>>>,
 }
 
 impl BoxFaces {
-    /// The signed face in an actual frame direction.
+    /// The signed face in an actual total-frame direction.
     pub fn face(&self, sign: Sign, direction: usize) -> Option<&Arc<FramedPoset>> {
-        self.frame
+        self.total_frame
             .binary_search(&direction)
             .ok()
             .map(|index| &self.by_direction[index][sign])
     }
 
     fn well_formed(&self) -> bool {
-        if self.frame.is_empty()
-            || !intset::is_sorted_unique(&self.frame)
-            || self.frame.len() != self.by_direction.len()
+        if self.total_frame.is_empty()
+            || !intset::is_sorted_unique(&self.total_frame)
+            || self.total_frame.len() != self.by_direction.len()
         {
             return false;
         }
 
-        let expected_input_dimension = self.frame.len() as isize - 1;
-        self.frame
+        let expected_input_dimension = self.total_frame.len() as isize - 1;
+        self.total_frame
             .iter()
             .copied()
             .zip(&self.by_direction)
             .all(|(direction, signed_faces)| {
                 [Sign::Input, Sign::Output].into_iter().all(|sign| {
                     let face = &signed_faces[sign];
-                    let face_frame = face.active_directions();
-                    intset::is_subset(&face_frame, &self.frame)
-                        && face_frame.binary_search(&direction).is_err()
+                    let face_total_frame = face.total_frame();
+                    intset::is_subset(&face_total_frame, &self.total_frame)
+                        && face_total_frame.binary_search(&direction).is_err()
                         && (sign != Sign::Input || face.dim() == expected_input_dimension)
                         && is_cubular(CubularityMode::Strong, face)
                 })
@@ -93,11 +93,12 @@ impl BoxFaces {
 
 /// An isomorphism identifying the overlap of two box faces.
 ///
-/// `left_direction` and `right_direction` are positions in [`BoxFaces::frame`],
-/// not the direction values themselves. The isomorphism has type
+/// `left_direction` and `right_direction` are positions in
+/// [`BoxFaces::total_frame`], not the direction values themselves. The
+/// isomorphism has type
 ///
-/// `boundary(right_sign, frame[right_direction], left_face)
-///     -> boundary(left_sign, frame[left_direction], right_face)`.
+/// `boundary(right_sign, total_frame[right_direction], left_face)
+///     -> boundary(left_sign, total_frame[left_direction], right_face)`.
 #[derive(Debug, Clone)]
 pub struct BoxGluing {
     pub left_direction: usize,
@@ -111,14 +112,14 @@ pub struct BoxGluing {
 #[derive(Debug, Clone)]
 pub struct BoxConstruction {
     pub shape: Arc<FramedPoset>,
-    pub frame: IntSet,
+    pub total_frame: IntSet,
     pub face_embeddings: Vec<SignedPair<Embedding>>,
 }
 
 impl BoxConstruction {
     /// Inclusion of the requested signed directional face.
     pub fn face(&self, sign: Sign, direction: usize) -> Option<&Embedding> {
-        self.frame
+        self.total_frame
             .binary_search(&direction)
             .ok()
             .map(|index| &self.face_embeddings[index][sign])
@@ -127,8 +128,8 @@ impl BoxConstruction {
 
 /// Construct a box from signed directional faces and overlap isomorphisms.
 ///
-/// There must be one gluing for every pair of signed faces in unequal frame
-/// directions. Gluings may be supplied in either direction.
+/// There must be one gluing for every pair of signed faces in unequal
+/// total-frame directions. Gluings may be supplied in either direction.
 pub fn box_construction(faces: &BoxFaces, gluings: &[BoxGluing]) -> BoxConstruction {
     debug_assert!(faces.well_formed());
     let prepared = prepare_gluings(faces, gluings);
@@ -150,23 +151,23 @@ pub fn rigid_box_construction(faces: &BoxFaces) -> BoxConstruction {
     );
 
     let mut prepared = Vec::new();
-    for left in 0..faces.frame.len() {
-        for right in left + 1..faces.frame.len() {
+    for left in 0..faces.total_frame.len() {
+        for right in left + 1..faces.total_frame.len() {
             for left_sign in [Sign::Input, Sign::Output] {
                 for right_sign in [Sign::Input, Sign::Output] {
                     let left_face = &faces.by_direction[left][left_sign];
                     let right_face = &faces.by_direction[right][right_sign];
                     let (left_boundary, left_into_face) =
-                        boundary(right_sign, faces.frame[right], left_face);
+                        boundary(right_sign, faces.total_frame[right], left_face);
                     let (right_boundary, right_into_face) =
-                        boundary(left_sign, faces.frame[left], right_face);
+                        boundary(left_sign, faces.total_frame[left], right_face);
                     let mut candidates = isomorphisms(&left_boundary, &right_boundary);
                     assert_eq!(
                         candidates.len(),
                         1,
                         "box faces ({left_sign:?}, {}) and ({right_sign:?}, {}) must have exactly one boundary isomorphism",
-                        faces.frame[left],
-                        faces.frame[right],
+                        faces.total_frame[left],
+                        faces.total_frame[right],
                     );
 
                     prepared.push(PreparedGluing {
@@ -191,7 +192,7 @@ pub fn rigid_box_construction(faces: &BoxFaces) -> BoxConstruction {
 ///
 /// The first argument is the input and the second is the output. Their
 /// direction-zero boundaries must be isomorphic for both signs, and the output
-/// frame must be contained in the input frame.
+/// total frame must be contained in the input total frame.
 pub fn elementary_cylinder(
     input: &Arc<FramedPoset>,
     output: &Arc<FramedPoset>,
@@ -199,11 +200,11 @@ pub fn elementary_cylinder(
     debug_assert!(is_volumetric(input));
     debug_assert!(is_volumetric(output));
 
-    let input_frame = input.active_directions();
-    let output_frame = output.active_directions();
+    let input_total_frame = input.total_frame();
+    let output_total_frame = output.total_frame();
     assert!(
-        intset::is_subset(&output_frame, &input_frame),
-        "the elementary-cylinder output frame must be contained in the input frame",
+        intset::is_subset(&output_total_frame, &input_total_frame),
+        "the elementary-cylinder output total frame must be contained in the input total frame",
     );
     for sign in [Sign::Input, Sign::Output] {
         let (input_boundary, _) = boundary(sign, 0, input);
@@ -254,8 +255,10 @@ fn prepare_gluings(faces: &BoxFaces, gluings: &[BoxGluing]) -> Vec<PreparedGluin
 
             let left_face = &faces.by_direction[left_direction][left_sign];
             let right_face = &faces.by_direction[right_direction][right_sign];
-            let (_, left_into_face) = boundary(right_sign, faces.frame[right_direction], left_face);
-            let (_, right_into_face) = boundary(left_sign, faces.frame[left_direction], right_face);
+            let (_, left_into_face) =
+                boundary(right_sign, faces.total_frame[right_direction], left_face);
+            let (_, right_into_face) =
+                boundary(left_sign, faces.total_frame[left_direction], right_face);
             PreparedGluing {
                 left_direction,
                 left_sign,
@@ -273,7 +276,7 @@ fn prepared_gluings_well_formed(faces: &BoxFaces, gluings: &[PreparedGluing]) ->
     let mut labels = HashSet::with_capacity(gluings.len());
     for gluing in gluings {
         if gluing.left_direction >= gluing.right_direction
-            || gluing.right_direction >= faces.frame.len()
+            || gluing.right_direction >= faces.total_frame.len()
             || !labels.insert((
                 gluing.left_direction,
                 gluing.left_sign,
@@ -288,8 +291,8 @@ fn prepared_gluings_well_formed(faces: &BoxFaces, gluings: &[PreparedGluing]) ->
         }
     }
 
-    for left in 0..faces.frame.len() {
-        for right in left + 1..faces.frame.len() {
+    for left in 0..faces.total_frame.len() {
+        for right in left + 1..faces.total_frame.len() {
             for left_sign in [Sign::Input, Sign::Output] {
                 for right_sign in [Sign::Input, Sign::Output] {
                     if !labels.contains(&(left, left_sign, right, right_sign)) {
@@ -336,7 +339,7 @@ fn construct_prepared_box(faces: &BoxFaces, prepared: Vec<PreparedGluing>) -> Bo
         .collect();
     let colimit = finite_colimit(&objects, &spans);
     let mut injections = colimit.injections.into_iter();
-    let into_boundary = (0..faces.frame.len())
+    let into_boundary = (0..faces.total_frame.len())
         .map(|_| SignedPair {
             input: injections.next().unwrap(),
             output: injections.next().unwrap(),
@@ -352,49 +355,49 @@ fn attach_top(
     boundary_shape: Arc<FramedPoset>,
     into_boundary: Vec<SignedPair<Embedding>>,
 ) -> BoxConstruction {
-    let top_dim = faces.frame.len();
-    let mut basis = boundary_shape.basis.clone();
+    let top_dim = faces.total_frame.len();
+    let mut frames = boundary_shape.frames.clone();
     let mut faces_in = boundary_shape.faces_in.clone();
     let mut faces_out = boundary_shape.faces_out.clone();
-    basis.resize_with(top_dim + 1, Vec::new);
+    frames.resize_with(top_dim + 1, Vec::new);
     faces_in.resize_with(top_dim + 1, Vec::new);
     faces_out.resize_with(top_dim + 1, Vec::new);
-    debug_assert!(basis[top_dim].is_empty());
+    debug_assert!(frames[top_dim].is_empty());
 
     let top_faces = |sign| {
         intset::collect_sorted(
             faces
-                .frame
+                .total_frame
                 .iter()
                 .copied()
                 .zip(&faces.by_direction)
                 .zip(&into_boundary)
                 .flat_map(|((direction, signed_faces), signed_embedding)| {
-                    let face_basis: IntSet = faces
-                        .frame
+                    let face_frame: IntSet = faces
+                        .total_frame
                         .iter()
                         .copied()
                         .filter(|&candidate| candidate != direction)
                         .collect();
-                    let dim = face_basis.len();
+                    let dim = face_frame.len();
                     signed_faces[sign]
-                        .basis
+                        .frames
                         .get(dim)
                         .into_iter()
                         .flatten()
                         .enumerate()
-                        .filter(move |(_, basis)| **basis == face_basis)
+                        .filter(move |(_, frame)| **frame == face_frame)
                         .map(move |(pos, _)| signed_embedding[sign].map[dim][pos])
                 }),
         )
     };
     let top_input_faces = top_faces(Sign::Input);
     let top_output_faces = top_faces(Sign::Output);
-    basis[top_dim].push(faces.frame.clone());
+    frames[top_dim].push(faces.total_frame.clone());
     faces_in[top_dim].push(top_input_faces);
     faces_out[top_dim].push(top_output_faces);
 
-    let shape = Arc::new(FramedPoset::from_faces(basis, faces_in, faces_out));
+    let shape = Arc::new(FramedPoset::from_faces(frames, faces_in, faces_out));
     let boundary_map: Vec<Vec<usize>> = boundary_shape
         .sizes()
         .into_iter()
@@ -421,7 +424,7 @@ fn attach_top(
 
     BoxConstruction {
         shape,
-        frame: faces.frame.clone(),
+        total_frame: faces.total_frame.clone(),
         face_embeddings,
     }
 }
@@ -430,33 +433,40 @@ fn elementary_cylinder_recursive(
     input: &Arc<FramedPoset>,
     output: &Arc<FramedPoset>,
 ) -> Arc<FramedPoset> {
-    let frame = input.active_directions();
-    if frame.is_empty() {
+    let total_frame = input.total_frame();
+    if total_frame.is_empty() {
         return Arc::new(tight_arrow());
     }
 
-    let cylinder_frame: IntSet = std::iter::once(0)
-        .chain(frame.iter().map(|direction| {
+    let cylinder_total_frame: IntSet = std::iter::once(0)
+        .chain(total_frame.iter().map(|direction| {
             direction
                 .checked_add(1)
                 .expect("cannot shift direction usize::MAX")
         }))
         .collect();
-    let mut by_direction = Vec::with_capacity(cylinder_frame.len());
+    let mut by_direction = Vec::with_capacity(cylinder_total_frame.len());
     by_direction.push(SignedPair {
         input: Arc::new(shift(input)),
         output: Arc::new(shift(output)),
     });
 
-    for index in 0..frame.len() {
+    for index in 0..total_frame.len() {
         by_direction.push(SignedPair {
-            input: elementary_cylinder_face(Sign::Input, index, &frame, input, input, output),
-            output: elementary_cylinder_face(Sign::Output, index, &frame, output, input, output),
+            input: elementary_cylinder_face(Sign::Input, index, &total_frame, input, input, output),
+            output: elementary_cylinder_face(
+                Sign::Output,
+                index,
+                &total_frame,
+                output,
+                input,
+                output,
+            ),
         });
     }
 
     rigid_box_construction(&BoxFaces {
-        frame: cylinder_frame,
+        total_frame: cylinder_total_frame,
         by_direction,
     })
     .shape
@@ -465,14 +475,18 @@ fn elementary_cylinder_recursive(
 fn elementary_cylinder_face(
     sign: Sign,
     index: usize,
-    frame: &IntSet,
+    total_frame: &IntSet,
     signed_shape: &Arc<FramedPoset>,
     input: &Arc<FramedPoset>,
     output: &Arc<FramedPoset>,
 ) -> Arc<FramedPoset> {
-    let left = Arc::new(shift(&boundary_block(sign, &frame[..=index], signed_shape)));
-    let inner_input = boundary_block(sign, &frame[index..], input);
-    let inner_output = boundary_block(sign, &frame[index..], output);
+    let left = Arc::new(shift(&boundary_block(
+        sign,
+        &total_frame[..=index],
+        signed_shape,
+    )));
+    let inner_input = boundary_block(sign, &total_frame[index..], input);
+    let inner_output = boundary_block(sign, &total_frame[index..], output);
     let inner_cylinder = elementary_cylinder_recursive(&inner_input, &inner_output);
     Arc::new(orthogonal_product(&left, &inner_cylinder))
 }
@@ -519,18 +533,18 @@ mod tests {
 
     fn unique_gluings(faces: &BoxFaces) -> Vec<BoxGluing> {
         let mut gluings = Vec::new();
-        for left in 0..faces.frame.len() {
-            for right in left + 1..faces.frame.len() {
+        for left in 0..faces.total_frame.len() {
+            for right in left + 1..faces.total_frame.len() {
                 for left_sign in [Sign::Input, Sign::Output] {
                     for right_sign in [Sign::Input, Sign::Output] {
                         let (left_boundary, _) = boundary(
                             right_sign,
-                            faces.frame[right],
+                            faces.total_frame[right],
                             &faces.by_direction[left][left_sign],
                         );
                         let (right_boundary, _) = boundary(
                             left_sign,
-                            faces.frame[left],
+                            faces.total_frame[left],
                             &faces.by_direction[right][right_sign],
                         );
                         let mut candidates = isomorphisms(&left_boundary, &right_boundary);
@@ -550,7 +564,10 @@ mod tests {
     }
 
     fn assert_faces_are_boundaries(construction: &BoxConstruction) {
-        for (&direction, embeddings) in construction.frame.iter().zip(&construction.face_embeddings)
+        for (&direction, embeddings) in construction
+            .total_frame
+            .iter()
+            .zip(&construction.face_embeddings)
         {
             for sign in [Sign::Input, Sign::Output] {
                 let (_, actual) = boundary(sign, direction, &construction.shape);
@@ -562,7 +579,7 @@ mod tests {
     #[test]
     fn one_direction_rigid_box_is_the_tight_arrow() {
         let construction = rigid_box_construction(&BoxFaces {
-            frame: vec![0],
+            total_frame: vec![0],
             by_direction: vec![SignedPair {
                 input: point(),
                 output: point(),
@@ -578,7 +595,7 @@ mod tests {
     #[test]
     fn explicit_and_rigid_boxes_of_four_edges_are_the_standard_square() {
         let faces = BoxFaces {
-            frame: vec![0, 1],
+            total_frame: vec![0, 1],
             by_direction: vec![
                 SignedPair {
                     input: arrow(1),
@@ -621,7 +638,7 @@ mod tests {
         let output = point();
         let cylinder = elementary_cylinder(&input, &output);
 
-        assert_eq!(cylinder.active_directions(), vec![0, 1]);
+        assert_eq!(cylinder.total_frame(), vec![0, 1]);
         assert!(is_volumetric(&cylinder));
     }
 }

@@ -75,8 +75,8 @@ fn main() -> io::Result<()> {
                 let left = Arc::clone(&factors[case.left].shape);
                 let right = Arc::clone(&shifted[case.right]);
                 debug_assert!(ofposets::intset::is_disjoint(
-                    &left.active_directions(),
-                    &right.active_directions(),
+                    &left.total_frame(),
+                    &right.total_frame(),
                 ));
                 let product_shape = Arc::new(orthogonal_product(&left, &right));
 

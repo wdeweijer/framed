@@ -47,7 +47,7 @@ mod vector {
 }
 
 /// A compass direction generalized to n dimensions: positive or negative
-/// along a single basis axis. `axis(0)`/`axis(1)` correspond to what would
+/// along a single frame axis. `axis(0)`/`axis(1)` correspond to what would
 /// be `e`/`n` in the 2D version; there's no bound on how high `axis` can go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AxisPort {
@@ -76,8 +76,8 @@ pub struct Edge {
     pub head: usize,
     pub tail_port: Option<AxisPort>,
     pub head_port: Option<AxisPort>,
-    /// Whether this edge joins a point (empty basis) to a line
-    /// (one-element basis), so it uses the one-dimensional coefficients.
+    /// Whether this edge joins a point (empty frame) to a line
+    /// (one-element frame), so it uses the one-dimensional coefficients.
     pub one_dimensional: bool,
 }
 
